@@ -513,11 +513,11 @@ ON CONFLICT (section) DO NOTHING;
 
 -- Seed Subjects
 INSERT INTO subjects (id, subject_code, subject_name, department) VALUES
-  ('s1111111-1111-1111-1111-111111111111', 'CS301', 'Data Structures', 'CSE'),
-  ('s2222222-2222-2222-2222-222222222222', 'CS302', 'Database Management Systems', 'CSE'),
-  ('s3333333-3333-3333-3333-333333333333', 'CS303', 'Operating Systems', 'CSE'),
-  ('s4444444-4444-4444-4444-444444444444', 'CS304', 'Computer Networks', 'CSE'),
-  ('s5555555-5555-5555-5555-555555555555', 'CS305', 'Software Engineering', 'CSE')
+  ('a1111111-1111-1111-1111-111111111111', 'CS301', 'Data Structures', 'CSE'),
+  ('a2222222-2222-2222-2222-222222222222', 'CS302', 'Database Management Systems', 'CSE'),
+  ('a3333333-3333-3333-3333-333333333333', 'CS303', 'Operating Systems', 'CSE'),
+  ('a4444444-4444-4444-4444-444444444444', 'CS304', 'Computer Networks', 'CSE'),
+  ('a5555555-5555-5555-5555-555555555555', 'CS305', 'Software Engineering', 'CSE')
 ON CONFLICT (subject_code) DO NOTHING;
 
 -- Trigger: When a new auth.users record is created, automatically generate corresponding profile

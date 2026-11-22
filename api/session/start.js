@@ -51,7 +51,7 @@ module.exports = async function handler(req, res) {
     let { data: subject } = await supabaseAdmin.from('subjects').select('id').eq('subject_code', subject_code).maybeSingle();
     let { data: classRec } = await supabaseAdmin.from('classes').select('id').eq('section', class_section).maybeSingle();
 
-    const subjectId = subject ? subject.id : 's1111111-1111-1111-1111-111111111111';
+    const subjectId = subject ? subject.id : 'a1111111-1111-1111-1111-111111111111';
     const classId = classRec ? classRec.id : 'c1111111-1111-1111-1111-111111111111';
 
     // Call stored procedure or direct insert
