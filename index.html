@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>SmartAttend ERP — Two-Factor Attendance (Demo)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>
+tailwind.config = {
+  theme: { extend: {
+    colors: { navy: { 50:'#EEF3FA',100:'#D7E2F2',200:'#AFC4E4',300:'#7C9ACB',400:'#4B6EA9',500:'#2B4C85',600:'#1B3A6B',700:'#132C55',800:'#0E2144',900:'#0A1A38',950:'#06122A' } },
+    fontFamily: { display: ['Sora','Manrope','system-ui','sans-serif'], sans: ['Manrope','system-ui','sans-serif'] }
+  } }
+};
+</script>
+<style>
+:root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+html, body { background: #fff; }
+body { color: #0A1A38; font-family: 'Manrope', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+.font-display { font-family: 'Sora', 'Manrope', system-ui, sans-serif; }
+@keyframes scan { 0% { top: 6%; } 50% { top: 92%; } 100% { top: 6%; } }
+@keyframes ring { 0% { transform: scale(.55); opacity: .65; } 100% { transform: scale(1.7); opacity: 0; } }
+@keyframes pop { 0% { transform: scale(.6); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes slidein { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+.anim-pop { animation: pop .35s cubic-bezier(.2,.9,.3,1.3) both; }
+.anim-slide { animation: slidein .3s ease-out both; }
+.anim-blink { animation: blink 1.4s ease-in-out infinite; }
+.grid-bg { background-image: linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px); background-size: 36px 36px; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #06B6D4; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.js"></script>
+<script>
+const { useState, useEffect, useMemo, useRef } = React;
+// htm -> React, mapping "class" to className
+const h = (t, p, ...c) => { if (typeof t === 'string' && p && p.class !== undefined) { p = { ...p, className: p.class }; delete p.class; } return React.createElement(t, p, ...c); };
+const html = htm.bind(h);
+
+/* ---------- helpers ---------- */
+const cx = (...a) => a.filter(Boolean).join(' ');
+const pct = (p, t) => (t ? Math.round((p / t) * 1000) / 10 : 0);
+const tone = (v) => v >= 85
+  ? { t: 'text-emerald-700', bg: 'bg-emerald-50', bar: 'bg-emerald-500', hex: '#10B981', label: 'Good', ring: 'ring-emerald-200' }
+  : v >= 75
+  ? { t: 'text-amber-700', bg: 'bg-amber-50', bar: 'bg-amber-500', hex: '#F59E0B', label: 'Watch', ring: 'ring-amber-200' }
+  : { t: 'text-rose-700', bg: 'bg-rose-50', bar: 'bg-rose-500', hex: '#F43F5E', label: 'Low', ring: 'ring-rose-200' };
+const nowStr = () => new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+const initials = (n) => n.split(' ').filter((w) => !w.endsWith('.')).slice(0, 2).map((w) => w[0]).join('');
+let _uid = 0; const uid = () => 'u' + (++_uid);
+const rand = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+/* ---------- sample data ---------- */
+const SUBJECTS = [
+  { code: 'CS301', name: 'Data Structures', faculty: 'Dr. Meera Kulkarni' },
+  { code: 'CS302', name: 'Database Management Systems', faculty: 'Prof. Nikhil Joshi' },
+  { code: 'CS303', name: 'Operating Systems', faculty: 'Dr. Farah Sheikh' },
+  { code: 'CS304', name: 'Computer Networks', faculty: 'Prof. Anil Gokhale' },
+  { code: 'CS305', name: 'Software Engineering', faculty: 'Prof. Sneha Patwardhan' },
+];
+const subj = (c) => SUBJECTS.find((s) => s.code === c);
+const RAW = [
+  ['S2301','Aarav Sharma','CSE','CSE-3A',84],['S2302','Ananya Iyer','CSE','CSE-3A',93],['S2303','Vihaan Kulkarni','CSE','CSE-3A',71],
+  ['S2304','Diya Menon','CSE','CSE-3A',89],['S2305','Reyansh Patil','CSE','CSE-3A',78],['S2306','Isha Bhatt','CSE','CSE-3A',96],
+  ['S2307','Kabir Deshpande','CSE','CSE-3A',68],['S2308','Meera Nair','CSE','CSE-3A',82],['S2309','Arjun Reddy','CSE','CSE-3A',74],
+  ['S2310','Saanvi Gupta','CSE','CSE-3A',91],['S2311','Rohan Chavan','CSE','CSE-3A',86],['S2312','Tara Fernandes','CSE','CSE-3A',79],
+  ['S2401','Aditya Joshi','IT','IT-3A',88],['S2402','Neha Kapoor','IT','IT-3A',72],['S2403','Yash Wagh','IT','IT-3A',81],
+  ['S2501','Pranav Rao','ECE','ECE-3A',90],['S2502','Kritika Singh','ECE','ECE-3A',66],['S2503','Samar Khan','ECE','ECE-3B',77],
+  ['S2601','Riya Banerjee','AI & DS','AID-3A',94],['S2602','Omkar Thakur','AI & DS','AID-3A',85],['S2603','Zoya Ansari','AI & DS','AID-3A',73],
+  ['S2701','Harsh Vora','Mechanical','ME-3A',80],['S2702','Pooja Salunkhe','Mechanical','ME-3A',69],['S2703','Dev Malhotra','Mechanical','ME-3B',87],
+  ['S2801','Siddharth Pawar','Civil','CE-3A',76],['S2802','Anika Roy','Civil','CE-3A',92],['S2803','Tanmay Gaikwad','Civil','CE-3A',64],
+  ['S2901','Mihir Apte','Electrical','EE-3A',83],['S2902','Ritika Dubey','Electrical','EE-3A',70],['S2903','Varun Naik','Electrical','EE-3B',89],
+];
+const STUDENTS = RAW.map(([id, name, dept, cls, base]) => ({ id, name, dept, cls, base }));
+const ROSTER = STUDENTS.filter((s) => s.cls === 'CSE-3A');
+const ME_ID = 'S2301';
+const ME = STUDENTS[0];
+const DEPTS = [
+  { name: 'CSE', short: 'CSE', full: 'Computer Science & Engineering', hod: 'Dr. Sunita Phadke', students: 1120, faculty: 48 },
+  { name: 'IT', short: 'IT', full: 'Information Technology', hod: 'Dr. Rajesh Bhosale', students: 640, faculty: 30 },
+  { name: 'ECE', short: 'ECE', full: 'Electronics & Communication', hod: 'Dr. Lata Kamat', students: 720, faculty: 34 },
+  { name: 'AI & DS', short: 'AI&DS', full: 'Artificial Intelligence & Data Science', hod: 'Dr. Karan Mehra', students: 520, faculty: 26 },
+  { name: 'Mechanical', short: 'Mech', full: 'Mechanical Engineering', hod: 'Dr. Vinay Kshirsagar', students: 780, faculty: 36 },
+  { name: 'Civil', short: 'Civil', full: 'Civil Engineering', hod: 'Dr. Shalini Bapat', students: 540, faculty: 24 },
+  { name: 'Electrical', short: 'Elec', full: 'Electrical Engineering', hod: 'Dr. Manoj Tambe', students: 506, faculty: 14 },
+];
+const LECTURES0 = [
+  { id: 'L1', subject: 'CS301', title: 'Data Structures · Theory', topic: 'Balanced trees: AVL rotations', cls: 'CSE-3A', room: 'LT-204', time: '09:00 – 10:00', status: 'upcoming' },
+  { id: 'L2', subject: 'CS301', title: 'Data Structures · Tutorial', topic: 'Problem set 6: heaps and priority queues', cls: 'CSE-3A', room: 'TR-112', time: '12:00 – 13:00', status: 'upcoming' },
+  { id: 'L3', subject: 'CS301', title: 'Data Structures · Lab', topic: 'Lab 5: implement a hash table', cls: 'CSE-3A', room: 'Lab-3', time: '15:00 – 17:00', status: 'upcoming' },
+];
+const TT_TODAY = [
+  { time: '09:00 – 10:00', subject: 'CS301', title: 'Data Structures · Theory', room: 'LT-204', lec: 'L1' },
+  { time: '11:00 – 12:00', subject: 'CS302', title: 'DBMS · Theory', room: 'LT-201' },
+  { time: '12:00 – 13:00', subject: 'CS301', title: 'Data Structures · Tutorial', room: 'TR-112', lec: 'L2' },
+  { time: '14:00 – 15:00', subject: 'CS304', title: 'Computer Networks · Theory', room: 'LT-205' },
+  { time: '15:00 – 17:00', subject: 'CS301', title: 'Data Structures · Lab', room: 'Lab-3', lec: 'L3' },
+];
+const TT_OTHER = {
+  Tuesday: [
+    { time: '09:00 – 10:00', subject: 'CS303', title: 'Operating Systems · Theory', room: 'LT-204' },
+    { time: '11:00 – 12:00', subject: 'CS305', title: 'Software Engineering · Theory', room: 'LT-206' },
+    { time: '14:00 – 16:00', subject: 'CS302', title: 'DBMS · Lab', room: 'Lab-2' },
+  ],
+  Wednesday: [
+    { time: '10:00 – 11:00', subject: 'CS304', title: 'Computer Networks · Theory', room: 'LT-205' },
+    { time: '11:00 – 12:00', subject: 'CS301', title: 'Data Structures · Theory', room: 'LT-204' },
+    { time: '14:00 – 15:00', subject: 'CS303', title: 'Operating Systems · Tutorial', room: 'TR-110' },
+  ],
+};
+const MATERIALS = [
+  { id: 1, subject: 'CS301', title: 'AVL Trees and Rotations', type: 'Slides', size: '3.2 MB', date: 'Oct 12' },
+  { id: 2, subject: 'CS301', title: 'Problem Set 6: Heaps', type: 'PDF', size: '420 KB', date: 'Oct 10' },
+  { id: 3, subject: 'CS302', title: 'Normalisation: 1NF to BCNF', type: 'Notes', size: '1.1 MB', date: 'Oct 9' },
+  { id: 4, subject: 'CS303', title: 'Process Scheduling Algorithms', type: 'Slides', size: '4.8 MB', date: 'Oct 8' },
+  { id: 5, subject: 'CS304', title: 'TCP Congestion Control (recorded)', type: 'Video', size: '86 MB', date: 'Oct 7' },
+  { id: 6, subject: 'CS305', title: 'UML Class Diagrams Cheat Sheet', type: 'PDF', size: '650 KB', date: 'Oct 6' },
+  { id: 7, subject: 'CS301', title: 'Lab 5: Hash Table Starter Code', type: 'Notes', size: '38 KB', date: 'Oct 5' },
+  { id: 8, subject: 'CS302', title: 'SQL Joins Practice Set', type: 'PDF', size: '510 KB', date: 'Oct 5' },
+];
+const HISTORY0 = [
+  { id: 'h1', date: 'Oct 9', time: '09:04 am', subject: 'CS301', status: 'Present', method: 'QR + BLE' },
+  { id: 'h2', date: 'Oct 9', time: '11:02 am', subject: 'CS302', status: 'Present', method: 'QR + BLE' },
+  { id: 'h3', date: 'Oct 9', time: '02:01 pm', subject: 'CS304', status: 'Absent', method: '—' },
+  { id: 'h4', date: 'Oct 8', time: '09:03 am', subject: 'CS301', status: 'Present', method: 'QR + BLE' },
+  { id: 'h5', date: 'Oct 8', time: '10:05 am', subject: 'CS303', status: 'Present', method: 'QR + BLE' },
+  { id: 'h6', date: 'Oct 7', time: '11:06 am', subject: 'CS305', status: 'Present', method: 'QR + BLE' },
+  { id: 'h7', date: 'Oct 7', time: '09:02 am', subject: 'CS301', status: 'Absent', method: '—' },
+  { id: 'h8', date: 'Oct 6', time: '02:03 pm', subject: 'CS304', status: 'Present', method: 'QR + BLE' },
+];
+const FAIL_REASONS = [
+  { step: 0, label: 'QR code expired', reason: 'QR token expired — it was generated more than 15 seconds ago.' },
+  { step: 1, label: 'Outside BLE range', reason: 'Classroom beacon not detected within 10 m. Move closer and try again.' },
+  { step: 0, label: 'Wrong classroom QR', reason: 'This QR belongs to a different class (CSE-3B). Scan your own lecture QR.' },
+];
+
+function initState() {
+  const att = {};
+  STUDENTS.forEach((s, i) => {
+    att[s.id] = {};
+    SUBJECTS.forEach((sub, j) => {
+      const t = 32 + ((i * 3 + j * 5) % 7);
+      const jit = ((i * 7 + j * 11) % 9) - 4;
+      const v = Math.min(99, Math.max(40, s.base + jit));
+      att[s.id][sub.code] = { p: Math.min(t, Math.round((t * v) / 100)), t };
+    });
+  });
+  return { att, history: HISTORY0.slice(), lectures: LECTURES0.map((l) => ({ ...l })), live: null, activity: [] };
+}
+const overall = (att, id) => {
+  let p = 0, t = 0;
+  SUBJECTS.forEach((s) => { p += att[id][s.code].p; t += att[id][s.code].t; });
+  return { p, t, v: pct(p, t) };
+};
+
+/* ---------- icons ---------- */
+const ICONS = {
+  home: 'M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z',
+  qr: 'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h3v3h-3z M20 14v3 M14 20h3 M20 20h1',
+  book: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5',
+  clock: 'M12 6v6l4 2 M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z',
+  users: 'M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2 M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M21 21v-2a4 4 0 0 0-3-3.9 M16 3.1a4 4 0 0 1 0 7.8',
+  chart: 'M3 3v18h18 M7 15l4-4 3 3 5-6',
+  bell: 'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9 M10.3 21a1.94 1.94 0 0 0 3.4 0',
+  search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z M21 21l-4.3-4.3',
+  check: 'M20 6 9 17l-5-5',
+  x: 'M18 6 6 18 M6 6l12 12',
+  bt: 'M7 7l10 10-5 5V2l5 5L7 17',
+  logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9',
+  file: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M8 13h8 M8 17h8',
+  download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3',
+  play: 'M6 3l14 9-14 9z',
+  stop: 'M6 6h12v12H6z',
+  shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+  building: 'M3 21h18 M5 21V7l8-4v18 M19 21V11l-6-4 M9 9v.01 M9 13v.01 M9 17v.01',
+  alert: 'M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z M12 9v4 M12 17h.01',
+  refresh: 'M3 12a9 9 0 0 1 15-6.7L21 8 M21 3v5h-5 M21 12a9 9 0 0 1-15 6.7L3 16 M3 21v-5h5',
+  menu: 'M3 6h18 M3 12h18 M3 18h18',
+  cap: 'M22 10 12 5 2 10l10 5z M6 12v5c3 2 9 2 12 0v-5',
+  signal: 'M5 12.55a11 11 0 0 1 14 0 M1.4 9a16 16 0 0 1 21.2 0 M8.5 16a6 6 0 0 1 7 0 M12 20h.01',
+  calendar: 'M8 2v4 M16 2v4 M3 10h18 M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
+  grid: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z',
+  camera: 'M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+  info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z M12 16v-4 M12 8h.01',
+  arrow: 'M5 12h14 M13 6l6 6-6 6',
+};
+const Icon = ({ n, c = 'w-5 h-5' }) => html`<svg class=${c} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d=${ICONS[n]} /></svg>`;
+
+/* ---------- shared UI ---------- */
+const btn = {
+  primary: 'inline-flex items-center justify-center gap-2 rounded-xl bg-navy-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-navy-700 active:scale-[.98] disabled:opacity-50 disabled:cursor-not-allowed',
+  cyan: 'inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-bold text-navy-950 shadow-sm transition hover:bg-cyan-400 active:scale-[.98] disabled:opacity-50 disabled:cursor-not-allowed',
+  ghost: 'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-navy-800 transition hover:bg-slate-50 active:scale-[.98] disabled:opacity-50',
+  danger: 'inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 active:scale-[.98]',
+  sm: 'inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-navy-800 transition hover:bg-cyan-50 hover:border-cyan-300 active:scale-[.97]',
+};
+const Card = ({ title, sub, right, children, class: c = '', pad = true }) => html`
+  <section class=${cx('rounded-2xl border border-slate-200 bg-white shadow-sm', c)}>
+    ${(title || right) && html`<header class="flex items-start justify-between gap-3 px-5 pt-5">
+      <div><h3 class="font-display text-[15px] font-semibold text-navy-900">${title}</h3>${sub && html`<p class="mt-0.5 text-xs text-slate-500">${sub}</p>`}</div>${right}
+    </header>`}
+    <div class=${pad ? 'p-5' : ''}>${children}</div>
+  </section>`;
+const Chip = ({ children, kind = 'slate' }) => {
+  const m = { slate: 'bg-slate-100 text-slate-600', green: 'bg-emerald-50 text-emerald-700', red: 'bg-rose-50 text-rose-700', amber: 'bg-amber-50 text-amber-700', cyan: 'bg-cyan-50 text-cyan-700', navy: 'bg-navy-50 text-navy-700' };
+  return html`<span class=${cx('inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold', m[kind])}>${children}</span>`;
+};
+const Avatar = ({ name, size = 'h-9 w-9 text-xs', c = 'bg-navy-100 text-navy-700' }) => html`<span class=${cx('inline-flex shrink-0 items-center justify-center rounded-full font-bold', size, c)}>${initials(name)}</span>`;
+const Stat = ({ label, value, sub, icon, accent = 'bg-cyan-50 text-cyan-600' }) => html`
+  <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div class="flex items-center justify-between"><p class="text-xs font-semibold text-slate-500">${label}</p><span class=${cx('flex h-9 w-9 items-center justify-center rounded-xl', accent)}><${Icon} n=${icon} c="h-[18px] w-[18px]" /></span></div>
+    <p class="mt-3 font-display text-3xl font-bold text-navy-900">${value}</p>
+    ${sub && html`<p class="mt-1 text-xs text-slate-500">${sub}</p>`}
+  </div>`;
+const Bar = ({ v, c }) => html`<div class="h-2 w-full overflow-hidden rounded-full bg-slate-100"><div class=${cx('h-full rounded-full transition-all duration-700', c || tone(v).bar)} style=${{ width: Math.min(100, v) + '%' }}></div></div>`;
+const Empty = ({ icon = 'search', title, sub }) => html`<div class="flex flex-col items-center py-10 text-center"><span class="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400"><${Icon} n=${icon} /></span><p class="text-sm font-semibold text-navy-800">${title}</p><p class="mt-1 max-w-xs text-xs text-slate-500">${sub}</p></div>`;
+
+function Ring({ value, size = 132, stroke = 12, label }) {
+  const r = (size - stroke) / 2, C = 2 * Math.PI * r, t = tone(value);
+  return html`<div class="relative shrink-0" style=${{ width: size, height: size }}>
+    <svg width=${size} height=${size} viewBox=${`0 0 ${size} ${size}`} style=${{ transform: 'rotate(-90deg)' }}>
+      <circle cx=${size / 2} cy=${size / 2} r=${r} fill="none" stroke="#E2E8F0" strokeWidth=${stroke} />
+      <circle cx=${size / 2} cy=${size / 2} r=${r} fill="none" stroke=${t.hex} strokeWidth=${stroke} strokeLinecap="round" strokeDasharray=${C} strokeDashoffset=${C * (1 - Math.min(100, value) / 100)} style=${{ transition: 'stroke-dashoffset .8s ease' }} />
+    </svg>
+    <div class="absolute inset-0 flex flex-col items-center justify-center"><span class="font-display text-2xl font-bold text-navy-900">${value.toFixed(1)}%</span>${label && html`<span class="text-[11px] text-slate-500">${label}</span>`}</div>
+  </div>`;
+}
+
+/* ---------- charts (inline SVG) ---------- */
+function BarChart({ data, h = 230, colorFn }) {
+  const W = 560, H = h, pl = 34, pb = 30, pt = 16, pr = 8, iw = W - pl - pr, ih = H - pt - pb, bw = iw / data.length;
+  const y = (v) => pt + ih - (v / 100) * ih;
+  return html`<svg viewBox=${`0 0 ${W} ${H}`} class="h-auto w-full" role="img" aria-label="Bar chart">
+    ${[0, 25, 50, 75, 100].map((g) => html`<g key=${g}><line x1=${pl} x2=${W - pr} y1=${y(g)} y2=${y(g)} stroke=${g === 75 ? '#F59E0B' : '#E2E8F0'} strokeDasharray=${g === 75 ? '4 4' : '0'} /><text x=${pl - 6} y=${y(g) + 4} textAnchor="end" fontSize="10" fill="#64748B">${g}</text></g>`)}
+    ${data.map((d, i) => { const x = pl + i * bw + bw * 0.2, w = bw * 0.6; return html`<g key=${d.label}>
+      <rect x=${x} y=${y(d.value)} width=${w} height=${pt + ih - y(d.value)} rx="6" fill=${colorFn ? colorFn(d.value) : '#0E2144'} />
+      <text x=${x + w / 2} y=${y(d.value) - 6} textAnchor="middle" fontSize="11" fontWeight="700" fill="#0A1A38">${Math.round(d.value)}</text>
+      <text x=${x + w / 2} y=${H - 10} textAnchor="middle" fontSize="10" fill="#64748B">${d.label}</text></g>`; })}
+  </svg>`;
+}
+function LineChart({ data, h = 230 }) {
+  const W = 560, H = h, pl = 34, pb = 30, pt = 16, pr = 14, iw = W - pl - pr, ih = H - pt - pb, lo = 60, hi = 100;
+  const x = (i) => pl + (i * iw) / (data.length - 1), y = (v) => pt + ih - ((v - lo) / (hi - lo)) * ih;
+  const pts = data.map((d, i) => `${x(i)},${y(d.value)}`).join(' ');
+  const area = `${x(0)},${pt + ih} ${pts} ${x(data.length - 1)},${pt + ih}`;
+  return html`<svg viewBox=${`0 0 ${W} ${H}`} class="h-auto w-full" role="img" aria-label="Line chart">
+    ${[60, 70, 80, 90, 100].map((g) => html`<g key=${g}><line x1=${pl} x2=${W - pr} y1=${y(g)} y2=${y(g)} stroke="#E2E8F0" /><text x=${pl - 6} y=${y(g) + 4} textAnchor="end" fontSize="10" fill="#64748B">${g}</text></g>`)}
+    <polygon points=${area} fill="#06B6D4" fillOpacity="0.12" />
+    <polyline points=${pts} fill="none" stroke="#0E2144" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+    ${data.map((d, i) => html`<g key=${d.label}><circle cx=${x(i)} cy=${y(d.value)} r=${i === data.length - 1 ? 6 : 4} fill=${i === data.length - 1 ? '#06B6D4' : '#fff'} stroke="#0E2144" strokeWidth="2.5" />
+      <text x=${x(i)} y=${y(d.value) - 11} textAnchor="middle" fontSize="11" fontWeight="700" fill="#0A1A38">${d.value.toFixed(1)}</text>
+      <text x=${x(i)} y=${H - 10} textAnchor="middle" fontSize="10" fill="#64748B">${d.label}</text></g>`)}
+  </svg>`;
+}
+
+/* ---------- QR (decorative, seeded) ---------- */
+function mulberry(a) { return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function QR({ seed, size = 200, fg = '#0A1A38', dim = false }) {
+  const N = 25;
+  const d = useMemo(() => {
+    const r = mulberry(seed), corners = [[0, 0], [N - 7, 0], [0, N - 7]];
+    let p = '';
+    for (let yy = 0; yy < N; yy++) for (let xx = 0; xx < N; xx++) {
+      let dark = null;
+      for (const [cx0, cy0] of corners) {
+        const dx = xx - cx0, dy = yy - cy0;
+        if (dx >= -1 && dx <= 7 && dy >= -1 && dy <= 7) {
+          dark = dx >= 0 && dx <= 6 && dy >= 0 && dy <= 6 && (dx === 0 || dx === 6 || dy === 0 || dy === 6 || (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4));
+        }
+      }
+      if (xx >= 16 && xx <= 20 && yy >= 16 && yy <= 20) { const ax = xx - 16, ay = yy - 16; dark = ax === 0 || ax === 4 || ay === 0 || ay === 4 || (ax === 2 && ay === 2); }
+      if (dark === null) dark = r() > 0.52;
+      if (dark) p += `M${xx} ${yy}h1v1h-1z`;
+    }
+    return p;
+  }, [seed]);
+  return html`<svg width=${size} height=${size} viewBox=${`-2 -2 ${N + 4} ${N + 4}`} style=${{ opacity: dim ? 0.55 : 1, maxWidth: '100%' }} role="img" aria-label="Simulated QR code" shapeRendering="crispEdges"><rect x="-2" y="-2" width=${N + 4} height=${N + 4} fill="#fff" /><path d=${d} fill=${fg} /></svg>`;
+}
+
+function Modal({ children, onClose, wide }) {
+  useEffect(() => { const k = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, []);
+  return html`<div class="fixed inset-0 z-[90] flex items-end justify-center bg-navy-950/60 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick=${onClose}>
+    <div class=${cx('anim-pop max-h-[95vh] w-full overflow-y-auto rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl', wide ? 'sm:max-w-2xl' : 'sm:max-w-md')} onClick=${(e) => e.stopPropagation()}>${children}</div></div>`;
+}
+
+/* ---------- toasts ---------- */
+function Toasts({ items }) {
+  const st = { success: ['bg-emerald-500', 'check'], error: ['bg-rose-500', 'x'], info: ['bg-cyan-500', 'info'] };
+  return html`<div class="pointer-events-none fixed right-3 z-[100] flex w-[calc(100%-1.5rem)] max-w-sm flex-col gap-2" style=${{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)' }} aria-live="polite">
+    ${items.map((t) => html`<div key=${t.id} class="anim-slide pointer-events-auto flex gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xl">
+      <span class=${cx('flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white', st[t.type][0])}><${Icon} n=${st[t.type][1]} c="h-4 w-4" /></span>
+      <div class="min-w-0"><p class="text-sm font-bold text-navy-900">${t.title}</p><p class="mt-0.5 text-xs leading-relaxed text-slate-500">${t.msg}</p></div></div>`)}
+  </div>`;
+}
+
+/* ============================================================ */
+/*                          LANDING                             */
+/* ============================================================ */
+function Landing({ onEnter }) {
+  const [seed, setSeed] = useState(7);
+  useEffect(() => { const t = setInterval(() => setSeed((s) => s + 1), 3500); return () => clearInterval(t); }, []);
+  const roles = [
+    { id: 'student', icon: 'cap', title: 'Student', who: 'Aarav Sharma · CSE-3A', desc: 'Scan the lecture QR and verify proximity to mark attendance.' },
+    { id: 'faculty', icon: 'users', title: 'Faculty', who: 'Dr. Meera Kulkarni · Data Structures', desc: 'Start a lecture, show the rotating QR, watch attendance fill live.' },
+    { id: 'admin', icon: 'building', title: 'Administrator', who: 'Prof. Rohan Deshmukh · Academic Office', desc: 'Track attendance across departments and follow up on shortfalls.' },
+  ];
+  return html`<div class="grid min-h-screen lg:grid-cols-[1.05fr_1fr]">
+    <div class="grid-bg relative overflow-hidden bg-gradient-to-br from-navy-950 via-navy-900 to-navy-700 p-8 text-white sm:p-12 lg:p-14">
+      <div class="relative z-10 flex items-center gap-3"><span class="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-400 text-navy-950"><${Icon} n="cap" /></span><span class="font-display text-lg font-semibold">SmartAttend ERP</span></div>
+      <div class="relative z-10 mt-12 max-w-xl lg:mt-20">
+        <h1 class="font-display text-4xl font-bold leading-[1.1] sm:text-5xl">Present means present: in the room, on the clock.</h1>
+        <p class="mt-5 max-w-lg text-base leading-relaxed text-navy-100">Every check-in needs two proofs. A QR code that changes every 15 seconds, and a Bluetooth signal from the classroom beacon. A photo of the screen sent to a friend won't pass either one.</p>
+      </div>
+      <div class="relative z-10 mt-12 flex flex-wrap items-center gap-8">
+        <div class="relative flex h-60 w-60 items-center justify-center">
+          ${[0, 1, 2].map((i) => html`<span key=${i} class="absolute inset-0 rounded-full border border-cyan-300/60" style=${{ animation: `ring 3.6s ease-out ${i * 1.2}s infinite` }}></span>`)}
+          <div class="relative rounded-2xl bg-white p-2.5 shadow-2xl"><${QR} seed=${seed} size=${150} fg="#0A1A38" /></div>
+        </div>
+        <div class="space-y-3 text-sm">
+          <div class="flex items-center gap-3"><span class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-cyan-300"><${Icon} n="qr" c="h-[18px] w-[18px]" /></span><div><p class="font-semibold">Factor 1: rotating QR</p><p class="text-xs text-navy-200">Shown on the faculty screen, expires in 15 s</p></div></div>
+          <div class="flex items-center gap-3"><span class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-cyan-300"><${Icon} n="bt" c="h-[18px] w-[18px]" /></span><div><p class="font-semibold">Factor 2: BLE proximity</p><p class="text-xs text-navy-200">Phone must hear the room beacon within 10 m</p></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="flex flex-col justify-center bg-white p-8 sm:p-12 lg:p-16">
+      <div class="mb-6 inline-flex w-fit items-center gap-2 rounded-full border border-amber-300 bg-amber-50 px-3.5 py-1.5 text-xs font-bold text-amber-800"><span class="anim-blink h-2 w-2 rounded-full bg-amber-500"></span>DEMO MODE: all data and verification are simulated</div>
+      <h2 class="font-display text-2xl font-bold text-navy-900">Choose a role to explore</h2>
+      <p class="mt-1.5 text-sm text-slate-500">No sign-in needed. You can switch roles at any time from the top bar.</p>
+      <div class="mt-7 space-y-3">
+        ${roles.map((r) => html`<button key=${r.id} onClick=${() => onEnter(r.id)} class="group flex w-full items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:border-cyan-400 hover:shadow-md">
+          <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-navy-50 text-navy-700 transition group-hover:bg-navy-800 group-hover:text-cyan-300"><${Icon} n=${r.icon} c="h-6 w-6" /></span>
+          <span class="min-w-0 flex-1"><span class="block font-display text-[15px] font-semibold text-navy-900">${r.title}</span><span class="block text-xs font-semibold text-cyan-700">${r.who}</span><span class="mt-0.5 block text-xs text-slate-500">${r.desc}</span></span>
+          <span class="text-slate-300 transition group-hover:translate-x-1 group-hover:text-cyan-500"><${Icon} n="arrow" /></span></button>`)}
+      </div>
+      <p class="mt-8 text-xs leading-relaxed text-slate-400">Prototype for jury demonstration. Frontend only, with fictional students and sample academic data.</p>
+    </div>
+  </div>`;
+}
+
+/* ============================================================ */
+/*                       SHELL / LAYOUT                         */
+/* ============================================================ */
+const NAV = {
+  student: [{ id: 'dashboard', label: 'Dashboard', icon: 'home' }, { id: 'attendance', label: 'My Attendance', icon: 'chart' }, { id: 'lectures', label: 'Lectures', icon: 'calendar' }, { id: 'materials', label: 'Materials', icon: 'book' }],
+  faculty: [{ id: 'dashboard', label: 'Dashboard', icon: 'home' }, { id: 'live', label: 'Live Lecture', icon: 'qr' }, { id: 'roster', label: 'Class Reports', icon: 'users' }],
+  admin: [{ id: 'dashboard', label: 'Dashboard', icon: 'home' }, { id: 'students', label: 'Students', icon: 'users' }, { id: 'departments', label: 'Departments', icon: 'building' }, { id: 'alerts', label: 'Alerts', icon: 'alert' }],
+};
+const USERS = { student: { name: 'Aarav Sharma', sub: 'CSE-3A · Sem 5' }, faculty: { name: 'Dr. Meera Kulkarni', sub: 'Dept. of CSE' }, admin: { name: 'Prof. Rohan Deshmukh', sub: 'Academic Office' } };
+const ROLE_LABEL = { student: 'Student', faculty: 'Faculty', admin: 'Admin' };
+
+function DemoGuide({ app, goto }) {
+  const { st } = app;
+  const completed = st.lectures.some((l) => l.status === 'completed');
+  const meDone = !!(st.live && st.live.present[ME_ID]) || st.history.some((x) => x.date === 'Today' && x.status === 'Present');
+  const cnt = st.live ? Object.keys(st.live.present).length : 0;
+  const steps = [
+    { t: 'Faculty starts a lecture', done: !!st.live || completed, go: ['faculty', 'live'] },
+    { t: 'Student scans QR (QR + BLE)', done: meDone, go: ['student', 'dashboard'] },
+    { t: 'Faculty watches live counter', done: cnt >= 2 || completed, go: ['faculty', 'live'] },
+    { t: 'Faculty ends the lecture', done: completed, go: ['faculty', 'live'] },
+    { t: 'Admin sees updated numbers', done: false, go: ['admin', 'dashboard'] },
+  ];
+  return html`<div class="rounded-2xl bg-navy-800 p-4 text-white">
+    <p class="font-display text-sm font-semibold">Demo script</p>
+    <ul class="mt-3 space-y-1.5">${steps.map((s, i) => html`<li key=${i}><button onClick=${() => goto(...s.go)} class="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1 text-left text-xs transition hover:bg-white/10">
+      <span class=${cx('flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold', s.done ? 'bg-emerald-400 text-navy-950' : 'bg-white/15 text-white')}>${s.done ? html`<${Icon} n="check" c="h-3 w-3" />` : i + 1}</span>
+      <span class=${s.done ? 'text-navy-200 line-through' : 'text-white'}>${s.t}</span></button></li>`)}</ul></div>`;
+}
+
+function Shell({ app, role, page, setPage, switchRole, goto, onLogout, children }) {
+  const [open, setOpen] = useState(false);
+  const [bell, setBell] = useState(false);
+  const nav = NAV[role], u = USERS[role];
+  const side = html`<div class="flex h-full flex-col gap-5 p-4">
+    <div class="flex items-center gap-3 px-1.5 pt-1"><span class="flex h-9 w-9 items-center justify-center rounded-xl bg-navy-800 text-cyan-300"><${Icon} n="cap" c="h-5 w-5" /></span><div><p class="font-display text-[15px] font-bold leading-tight text-navy-900">SmartAttend</p><p class="text-[11px] text-slate-500">University ERP</p></div></div>
+    <nav class="space-y-1">${nav.map((n) => html`<button key=${n.id} onClick=${() => { setPage(n.id); setOpen(false); }} class=${cx('flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition', page === n.id ? 'bg-navy-800 text-white shadow-sm' : 'text-slate-600 hover:bg-cyan-50 hover:text-navy-800')}>
+      <${Icon} n=${n.icon} c="h-[18px] w-[18px]" />${n.label}${n.id === 'live' && app.st.live && html`<span class="anim-blink ml-auto h-2 w-2 rounded-full bg-rose-500"></span>`}</button>`)}</nav>
+    <div class="mt-auto space-y-4"><${DemoGuide} app=${app} goto=${(r, p) => { goto(r, p); setOpen(false); }} />
+      <button onClick=${onLogout} class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-500 transition hover:bg-slate-100"><${Icon} n="logout" c="h-[18px] w-[18px]" />Back to login</button></div></div>`;
+  const title = nav.find((n) => n.id === page)?.label || '';
+  return html`<div class="flex min-h-screen bg-white">
+    <aside class="sticky top-0 hidden h-screen w-64 shrink-0 overflow-y-auto border-r border-slate-200 bg-white lg:block">${side}</aside>
+    ${open && html`<div class="fixed inset-0 z-[80] lg:hidden"><div class="absolute inset-0 bg-navy-950/50" onClick=${() => setOpen(false)}></div><div class="anim-slide absolute inset-y-0 left-0 w-72 overflow-y-auto bg-white shadow-2xl">${side}</div></div>`}
+    <div class="flex min-w-0 flex-1 flex-col">
+      <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-navy-900 px-4 py-2 text-xs text-white sm:px-6">
+        <span class="flex items-center gap-2 font-bold tracking-wide"><span class="anim-blink h-2 w-2 rounded-full bg-cyan-400"></span>DEMO MODE<span class="hidden font-medium text-navy-200 sm:inline">All verification and data are simulated. Nothing is stored.</span></span>
+        <button onClick=${app.resetDemo} class="inline-flex items-center gap-1.5 rounded-md bg-white/10 px-2.5 py-1 font-semibold transition hover:bg-white/20"><${Icon} n="refresh" c="h-3.5 w-3.5" />Reset demo data</button>
+      </div>
+      <header class="sticky top-0 z-30 flex items-center gap-3 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:px-6">
+        <button class="rounded-lg p-2 text-navy-800 hover:bg-slate-100 lg:hidden" onClick=${() => setOpen(true)} aria-label="Open menu"><${Icon} n="menu" /></button>
+        <h1 class="hidden font-display text-lg font-semibold text-navy-900 sm:block">${title}</h1>
+        <div class="ml-auto flex items-center gap-2 sm:gap-3">
+          <div class="flex rounded-xl bg-slate-100 p-1" role="tablist" aria-label="Switch demo role">${['student', 'faculty', 'admin'].map((r) => html`<button key=${r} role="tab" aria-selected=${role === r} onClick=${() => switchRole(r)} class=${cx('rounded-lg px-3 py-1.5 text-xs font-bold transition sm:px-4', role === r ? 'bg-navy-800 text-white shadow' : 'text-slate-500 hover:text-navy-800')}>${ROLE_LABEL[r]}</button>`)}</div>
+          <div class="relative"><button onClick=${() => setBell(!bell)} class="relative rounded-xl border border-slate-200 p-2.5 text-navy-800 transition hover:bg-slate-50" aria-label="Notifications"><${Icon} n="bell" c="h-[18px] w-[18px]" />${app.st.activity.length > 0 && html`<span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-cyan-500"></span>`}</button>
+            ${bell && html`<div class="anim-pop absolute right-0 top-12 z-40 w-80 max-w-[85vw] rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl"><p class="px-3 pb-1 pt-2 text-xs font-bold text-navy-900">Recent activity</p>
+              ${app.st.activity.length === 0 ? html`<${Empty} icon="bell" title="Nothing yet" sub="Start a lecture and verify a student to see activity here." />` : html`<ul class="max-h-72 overflow-y-auto">${app.st.activity.slice(0, 8).map((a) => html`<li key=${a.id} class="flex gap-2.5 rounded-xl px-3 py-2 hover:bg-slate-50"><span class=${cx('mt-1.5 h-2 w-2 shrink-0 rounded-full', a.type === 'error' ? 'bg-rose-500' : a.type === 'success' ? 'bg-emerald-500' : 'bg-cyan-500')}></span><div><p class="text-xs font-semibold text-navy-900">${a.text}</p><p class="text-[11px] text-slate-400">${a.time}</p></div></li>`)}</ul>`}</div>`}</div>
+          <div class="hidden items-center gap-2.5 border-l border-slate-200 pl-3 md:flex"><${Avatar} name=${u.name} c="bg-cyan-100 text-cyan-800" /><div class="leading-tight"><p class="text-xs font-bold text-navy-900">${u.name}</p><p class="text-[11px] text-slate-500">${u.sub}</p></div></div>
+        </div>
+      </header>
+      <main class="mx-auto w-full max-w-7xl flex-1 p-4 sm:p-6 lg:p-8">${children}</main>
+    </div>
+  </div>`;
+}
+
+/* ============================================================ */
+/*                       STUDENT PORTAL                         */
+/* ============================================================ */
+function lecStatus(app, entry) {
+  if (!entry.lec) return 'upcoming';
+  return app.st.lectures.find((l) => l.id === entry.lec).status;
+}
+function StatusChip({ s }) {
+  if (s === 'live') return html`<${Chip} kind="red"><span class="anim-blink h-1.5 w-1.5 rounded-full bg-rose-500"></span>Live now<//>`;
+  if (s === 'completed') return html`<${Chip} kind="green">Completed<//>`;
+  return html`<${Chip} kind="navy">Upcoming<//>`;
+}
+function Timetable({ app, items, compact }) {
+  return html`<ul class="divide-y divide-slate-100">${items.map((e, i) => { const s = lecStatus(app, e); return html`<li key=${i} class="flex items-center gap-3 py-3">
+    <div class="w-[88px] shrink-0 text-xs font-bold text-navy-700">${e.time}</div>
+    <div class="min-w-0 flex-1"><p class="truncate text-sm font-semibold text-navy-900">${e.title}</p><p class="text-xs text-slate-500">${e.room} · ${subj(e.subject).faculty}</p></div>
+    ${!compact || s === 'live' ? html`<${StatusChip} s=${s} />` : null}</li>`; })}</ul>`;
+}
+function MaterialRow({ m, app }) {
+  const col = { PDF: 'bg-rose-50 text-rose-600', Slides: 'bg-amber-50 text-amber-600', Video: 'bg-cyan-50 text-cyan-600', Notes: 'bg-emerald-50 text-emerald-600' }[m.type];
+  return html`<li class="flex items-center gap-3 py-3"><span class=${cx('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl', col)}><${Icon} n="file" c="h-5 w-5" /></span>
+    <div class="min-w-0 flex-1"><p class="truncate text-sm font-semibold text-navy-900">${m.title}</p><p class="text-xs text-slate-500">${subj(m.subject).name} · ${m.type} · ${m.size} · ${m.date}</p></div>
+    <button class=${btn.sm} onClick=${() => app.notify('info', 'Download started (demo)', m.title + ' is a sample file.')} aria-label=${'Download ' + m.title}><${Icon} n="download" c="h-3.5 w-3.5" />Get</button></li>`;
+}
+function HistoryTable({ rows }) {
+  if (!rows.length) return html`<${Empty} title="No records match" sub="Try a different subject or status filter." />`;
+  return html`<div class="overflow-x-auto"><table class="w-full min-w-[480px] text-left text-sm"><thead><tr class="text-xs text-slate-500"><th class="pb-2 font-semibold">Date</th><th class="pb-2 font-semibold">Subject</th><th class="pb-2 font-semibold">Verification</th><th class="pb-2 text-right font-semibold">Status</th></tr></thead>
+    <tbody class="divide-y divide-slate-100">${rows.map((r) => html`<tr key=${r.id}><td class="py-2.5 text-slate-600">${r.date}, ${r.time}</td><td class="py-2.5 font-semibold text-navy-900">${subj(r.subject).name}</td><td class="py-2.5 text-xs text-slate-500">${r.method}</td><td class="py-2.5 text-right"><${Chip} kind=${r.status === 'Present' ? 'green' : 'red'}>${r.status}<//></td></tr>`)}</tbody></table></div>`;
+}
+function SubjectBars({ att }) {
+  return html`<div class="space-y-4">${SUBJECTS.map((s) => { const { p, t } = att[ME_ID][s.code], v = pct(p, t), tn = tone(v), need = Math.max(0, Math.ceil((0.75 * t - p) / 0.25)); return html`<div key=${s.code}>
+    <div class="mb-1.5 flex items-baseline justify-between gap-3"><div class="min-w-0"><p class="truncate text-sm font-semibold text-navy-900">${s.name}</p><p class="text-xs text-slate-500">${s.code} · ${p}/${t} lectures${need > 0 ? ` · attend next ${need} to reach 75%` : ''}</p></div><span class=${cx('shrink-0 text-sm font-bold', tn.t)}>${v.toFixed(1)}%</span></div><${Bar} v=${v} /></div>`; })}</div>`;
+}
+
+function StudentDashboard({ app, setPage, openScan }) {
+  const { st } = app;
+  const o = overall(st.att, ME_ID);
+  const live = st.live, present = live && live.present[ME_ID];
+  const lecLive = live && st.lectures.find((l) => l.id === live.lectureId);
+  const todayCount = st.history.filter((h) => h.date === 'Today' && h.status === 'Present').length;
+  return html`<div class="space-y-6">
+    <div class="flex flex-wrap items-end justify-between gap-4"><div><h2 class="font-display text-2xl font-bold text-navy-900">Good morning, Aarav</h2><p class="mt-1 text-sm text-slate-500">Monday, 12 October 2026 · CSE-3A · Semester 5</p></div>
+      <button onClick=${openScan} class=${cx(btn.cyan, 'px-6 py-3.5 text-base shadow-lg shadow-cyan-500/30')}><${Icon} n="qr" c="h-5 w-5" />Scan QR</button></div>
+    ${live && !present && html`<div class="anim-pop flex flex-wrap items-center gap-4 rounded-2xl border border-cyan-300 bg-cyan-50 p-4"><span class="anim-blink h-3 w-3 rounded-full bg-rose-500"></span><div class="min-w-0 flex-1"><p class="text-sm font-bold text-navy-900">${lecLive.title} is live in ${lecLive.room}</p><p class="text-xs text-slate-600">Scan the QR on the faculty screen to mark your attendance.</p></div><button onClick=${openScan} class=${btn.primary}>Scan now</button></div>`}
+    ${present && html`<div class="anim-pop flex items-center gap-4 rounded-2xl border border-emerald-300 bg-emerald-50 p-4"><span class="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-white"><${Icon} n="check" c="h-5 w-5" /></span><div><p class="text-sm font-bold text-navy-900">You're marked present for ${lecLive.title}</p><p class="text-xs text-slate-600">Verified with QR + BLE at ${live.present[ME_ID].time}.</p></div></div>`}
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div class="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:col-span-2 xl:col-span-1"><${Ring} value=${o.v} size=${108} stroke=${11} /><div><p class="text-xs font-semibold text-slate-500">Overall attendance</p><p class=${cx('mt-1 text-sm font-bold', tone(o.v).t)}>${o.v >= 75 ? 'Eligible for exams' : 'Below 75% requirement'}</p></div></div>
+      <${Stat} label="Lectures attended" value=${o.p} sub=${`of ${o.t} conducted`} icon="check" accent="bg-emerald-50 text-emerald-600" />
+      <${Stat} label="Lectures today" value=${TT_TODAY.length} sub=${`${todayCount} marked present so far`} icon="calendar" />
+      <${Stat} label="Subjects below 75%" value=${SUBJECTS.filter((s) => pct(st.att[ME_ID][s.code].p, st.att[ME_ID][s.code].t) < 75).length} sub="Across 5 subjects" icon="alert" accent="bg-amber-50 text-amber-600" />
+    </div>
+    <div class="grid gap-6 xl:grid-cols-3">
+      <div class="space-y-6 xl:col-span-2">
+        <${Card} title="Subject-wise attendance" sub="Semester 5 · updates when a lecture is verified" right=${html`<button class=${btn.sm} onClick=${() => setPage('attendance')}>View details</button>`}><${SubjectBars} att=${st.att} /><//>
+        <${Card} title="Recent attendance history" right=${html`<button class=${btn.sm} onClick=${() => setPage('attendance')}>See all</button>`}><${HistoryTable} rows=${st.history.slice(0, 6)} /><//>
+      </div>
+      <div class="space-y-6">
+        <${Card} title="Upcoming lectures" sub="Today"><${Timetable} app=${app} items=${TT_TODAY.slice(0, 4)} /><//>
+        <${Card} title="Lecture materials" right=${html`<button class=${btn.sm} onClick=${() => setPage('materials')}>All</button>`}><ul class="divide-y divide-slate-100">${MATERIALS.slice(0, 3).map((m) => html`<${MaterialRow} key=${m.id} m=${m} app=${app} />`)}</ul><//>
+      </div>
+    </div>
+  </div>`;
+}
+
+function StudentAttendance({ app }) {
+  const { st } = app;
+  const [sf, setSf] = useState('all'), [stf, setStf] = useState('all');
+  const rows = st.history.filter((h) => (sf === 'all' || h.subject === sf) && (stf === 'all' || h.status === stf));
+  const o = overall(st.att, ME_ID);
+  return html`<div class="space-y-6">
+    <div><h2 class="font-display text-2xl font-bold text-navy-900">My attendance</h2><p class="mt-1 text-sm text-slate-500">Overall ${o.v.toFixed(1)}% · ${o.p} of ${o.t} lectures attended</p></div>
+    <${Card} title="Subject-wise breakdown" pad=${false}><div class="overflow-x-auto p-5 pt-3"><table class="w-full min-w-[560px] text-left text-sm"><thead><tr class="text-xs text-slate-500"><th class="pb-2 font-semibold">Subject</th><th class="pb-2 font-semibold">Faculty</th><th class="pb-2 font-semibold">Attended</th><th class="w-40 pb-2 font-semibold">Progress</th><th class="pb-2 text-right font-semibold">Status</th></tr></thead>
+      <tbody class="divide-y divide-slate-100">${SUBJECTS.map((s) => { const { p, t } = st.att[ME_ID][s.code], v = pct(p, t), tn = tone(v); return html`<tr key=${s.code}><td class="py-3"><p class="font-semibold text-navy-900">${s.name}</p><p class="text-xs text-slate-500">${s.code}</p></td><td class="py-3 text-slate-600">${s.faculty}</td><td class="py-3 font-semibold text-navy-900">${p}/${t}</td><td class="py-3"><div class="flex items-center gap-2"><div class="flex-1"><${Bar} v=${v} /></div><span class=${cx('w-12 text-right text-xs font-bold', tn.t)}>${v.toFixed(1)}%</span></div></td><td class="py-3 text-right"><span class=${cx('rounded-full px-2.5 py-0.5 text-[11px] font-semibold', tn.bg, tn.t)}>${tn.label}</span></td></tr>`; })}</tbody></table></div><//>
+    <${Card} title="Attendance history" right=${html`<div class="flex flex-wrap gap-2"><select value=${sf} onChange=${(e) => setSf(e.target.value)} class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-navy-800" aria-label="Filter by subject"><option value="all">All subjects</option>${SUBJECTS.map((s) => html`<option key=${s.code} value=${s.code}>${s.name}</option>`)}</select>
+      ${['all', 'Present', 'Absent'].map((x) => html`<button key=${x} onClick=${() => setStf(x)} class=${cx('rounded-lg px-3 py-1.5 text-xs font-semibold transition', stf === x ? 'bg-navy-800 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50')}>${x === 'all' ? 'All' : x}</button>`)}</div>`}><${HistoryTable} rows=${rows} /><//>
+  </div>`;
+}
+
+function StudentLectures({ app }) {
+  const [day, setDay] = useState('Today');
+  const items = day === 'Today' ? TT_TODAY : TT_OTHER[day];
+  return html`<div class="space-y-6"><div><h2 class="font-display text-2xl font-bold text-navy-900">Lectures</h2><p class="mt-1 text-sm text-slate-500">Your timetable for this week</p></div>
+    <div class="flex gap-2">${['Today', 'Tuesday', 'Wednesday'].map((d) => html`<button key=${d} onClick=${() => setDay(d)} class=${cx('rounded-xl px-4 py-2 text-sm font-semibold transition', day === d ? 'bg-navy-800 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50')}>${d}</button>`)}</div>
+    <${Card} title=${day === 'Today' ? 'Monday, 12 October' : day}><${Timetable} app=${app} items=${items} /><//></div>`;
+}
+function StudentMaterials({ app }) {
+  const [f, setF] = useState('all'), [q, setQ] = useState('');
+  const rows = MATERIALS.filter((m) => (f === 'all' || m.subject === f) && m.title.toLowerCase().includes(q.toLowerCase()));
+  return html`<div class="space-y-6"><div><h2 class="font-display text-2xl font-bold text-navy-900">Lecture materials</h2><p class="mt-1 text-sm text-slate-500">Slides, notes and recordings shared by your faculty</p></div>
+    <div class="flex flex-wrap gap-3"><div class="relative min-w-[200px] flex-1"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><${Icon} n="search" c="h-4 w-4" /></span><input value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Search materials" class="w-full rounded-xl border border-slate-200 py-2.5 pl-9 pr-3 text-sm" /></div>
+      <select value=${f} onChange=${(e) => setF(e.target.value)} class="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-navy-800" aria-label="Filter by subject"><option value="all">All subjects</option>${SUBJECTS.map((s) => html`<option key=${s.code} value=${s.code}>${s.name}</option>`)}</select></div>
+    <${Card}>${rows.length ? html`<ul class="divide-y divide-slate-100">${rows.map((m) => html`<${MaterialRow} key=${m.id} m=${m} app=${app} />`)}</ul>` : html`<${Empty} title="No materials found" sub="Change the subject filter or clear the search." />`}<//></div>`;
+}
+
+/* ---- simulated QR scanner ---- */
+function Scanner({ app, onClose }) {
+  const [phase, setPhase] = useState('ready');
+  const [steps, setSteps] = useState(['idle', 'idle']);
+  const [res, setRes] = useState(null);
+  const [menu, setMenu] = useState(false);
+  const timers = useRef([]);
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+  const later = (fn, ms) => timers.current.push(setTimeout(fn, ms));
+  const s0 = app.st, live = s0.live, lec = live && s0.lectures.find((l) => l.id === live.lectureId);
+
+  const fail = (reason, count) => { setPhase('result'); setRes({ ok: false, reason }); if (count) app.failAttempt(ME_ID, reason); else app.notify('error', 'Verification failed', reason); };
+  const run = (failure) => {
+    setPhase('verifying'); setMenu(false); setSteps(['run', 'idle']);
+    later(() => {
+      const s = app.getState();
+      let f = failure;
+      if (!f && !s.live) { setSteps(['fail', 'idle']); return fail('No active lecture. Ask the faculty to start the lecture first.', false); }
+      if (f && f.step === 0) { setSteps(['fail', 'idle']); return fail(f.reason, true); }
+      setSteps(['ok', 'run']);
+      later(() => {
+        if (f && f.step === 1) { setSteps(['ok', 'fail']); return fail(f.reason, true); }
+        const r = app.markPresent(ME_ID, 'QR + BLE');
+        if (!r.ok) { setSteps(['ok', 'fail']); return fail('Attendance is already recorded for this lecture.', false); }
+        setSteps(['ok', 'ok']); setPhase('result');
+        setRes({ ok: true, time: r.time, lec: r.lec, rssi: -rand(52, 64), dist: (rand(21, 48) / 10).toFixed(1) });
+        app.notify('success', 'Attendance marked', `${r.lec.title} at ${r.time}`);
+      }, 1300);
+    }, 1000);
+  };
+  const stepRow = (i, title, sub) => { const s = steps[i]; return html`<li class="flex items-center gap-3 rounded-xl border border-slate-200 p-3">
+    <span class=${cx('flex h-8 w-8 items-center justify-center rounded-full text-white', s === 'ok' ? 'bg-emerald-500' : s === 'fail' ? 'bg-rose-500' : s === 'run' ? 'bg-cyan-500' : 'bg-slate-200')}>${s === 'ok' ? html`<${Icon} n="check" c="h-4 w-4" />` : s === 'fail' ? html`<${Icon} n="x" c="h-4 w-4" />` : s === 'run' ? html`<span class="anim-blink h-2.5 w-2.5 rounded-full bg-white"></span>` : html`<${Icon} n=${i === 0 ? 'qr' : 'bt'} c="h-4 w-4" />`}</span>
+    <div><p class="text-sm font-semibold text-navy-900">${title}</p><p class="text-xs text-slate-500">${s === 'run' ? 'Checking…' : s === 'ok' ? 'Passed' : s === 'fail' ? 'Failed' : sub}</p></div></li>`; };
+
+  return html`<${Modal} onClose=${onClose}>
+    <div class="flex items-center justify-between bg-navy-900 px-5 py-4 text-white"><div class="flex items-center gap-2.5"><${Icon} n="camera" c="h-5 w-5 text-cyan-300" /><span class="font-display text-sm font-semibold">Scan lecture QR</span></div><button onClick=${onClose} class="rounded-lg p-1.5 hover:bg-white/10" aria-label="Close scanner"><${Icon} n="x" c="h-5 w-5" /></button></div>
+    <div class="space-y-4 p-5">
+      <div class="rounded-lg bg-amber-50 px-3 py-2 text-center text-[11px] font-bold text-amber-800">DEMO MODE: camera and Bluetooth are simulated</div>
+      ${phase === 'ready' && html`<div>
+        <div class="relative mx-auto flex aspect-square w-full max-w-[300px] items-center justify-center overflow-hidden rounded-2xl bg-navy-950">
+          <${QR} seed=${live ? 4242 : 99} size=${200} fg="#7DD3FC" dim=${true} />
+          <div class="absolute h-0.5 w-[85%] bg-cyan-400 shadow-[0_0_14px_3px_rgba(34,211,238,.8)]" style=${{ animation: 'scan 2.4s ease-in-out infinite' }}></div>
+          ${['left-3 top-3 border-l-4 border-t-4 rounded-tl-xl', 'right-3 top-3 border-r-4 border-t-4 rounded-tr-xl', 'left-3 bottom-3 border-l-4 border-b-4 rounded-bl-xl', 'right-3 bottom-3 border-r-4 border-b-4 rounded-br-xl'].map((c) => html`<span key=${c} class=${cx('absolute h-9 w-9 border-cyan-400', c)}></span>`)}
+        </div>
+        <p class="mt-3 text-center text-xs text-slate-500">${live ? html`Lecture live: <b class="text-navy-800">${lec.title}</b> in ${lec.room}` : html`<b class="text-rose-600">No lecture is live.</b> Start one from the Faculty role to see a successful scan.`}</p>
+        <div class="mt-4 grid gap-2.5">
+          <button class=${btn.cyan} onClick=${() => run(null)}><${Icon} n="check" c="h-4 w-4" />Simulate successful scan</button>
+          <button class=${btn.ghost} onClick=${() => setMenu(!menu)}><${Icon} n="x" c="h-4 w-4 text-rose-500" />Simulate failed scan</button>
+          ${menu && html`<div class="anim-pop space-y-1.5 rounded-xl border border-slate-200 p-2">${FAIL_REASONS.map((f) => html`<button key=${f.label} onClick=${() => run(f)} class="w-full rounded-lg px-3 py-2 text-left text-sm font-semibold text-navy-800 hover:bg-rose-50">${f.label}</button>`)}</div>`}
+        </div></div>`}
+      ${phase === 'verifying' && html`<ul class="space-y-2.5 py-2">${stepRow(0, 'Factor 1: QR token', 'Waiting')}${stepRow(1, 'Factor 2: BLE proximity', 'Waiting')}</ul>`}
+      ${phase === 'result' && res && (res.ok ? html`<div class="anim-pop text-center">
+        <span class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500 text-white"><${Icon} n="check" c="h-9 w-9" /></span>
+        <h3 class="mt-4 font-display text-xl font-bold text-navy-900">Attendance marked</h3><p class="mt-1 text-sm text-slate-500">${res.lec.title}</p>
+        <dl class="mt-5 grid grid-cols-2 gap-2 text-left text-xs"><div class="rounded-xl bg-slate-50 p-3"><dt class="text-slate-500">Time</dt><dd class="mt-0.5 font-bold text-navy-900">${res.time}</dd></div><div class="rounded-xl bg-slate-50 p-3"><dt class="text-slate-500">Room</dt><dd class="mt-0.5 font-bold text-navy-900">${res.lec.room}</dd></div><div class="rounded-xl bg-slate-50 p-3"><dt class="text-slate-500">BLE signal</dt><dd class="mt-0.5 font-bold text-navy-900">${res.rssi} dBm · ~${res.dist} m</dd></div><div class="rounded-xl bg-slate-50 p-3"><dt class="text-slate-500">Verified by</dt><dd class="mt-0.5 font-bold text-navy-900">QR + BLE</dd></div></dl>
+        <button class=${cx(btn.primary, 'mt-5 w-full')} onClick=${onClose}>Back to dashboard</button></div>` : html`<div class="anim-pop text-center">
+        <span class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-rose-500 text-white"><${Icon} n="x" c="h-9 w-9" /></span>
+        <h3 class="mt-4 font-display text-xl font-bold text-navy-900">Verification failed</h3><p class="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-slate-600">${res.reason}</p>
+        <div class="mt-5 grid grid-cols-2 gap-2"><button class=${btn.ghost} onClick=${onClose}>Close</button><button class=${btn.primary} onClick=${() => { setPhase('ready'); setSteps(['idle', 'idle']); setRes(null); }}>Try again</button></div></div>`)}
+    </div>
+  <//>`;
+}
+
+/* ============================================================ */
+/*                       FACULTY PORTAL                         */
+/* ============================================================ */
+function LectureCard({ l, app, goLive }) {
+  const live = app.st.live && app.st.live.lectureId === l.id;
+  return html`<div class=${cx('rounded-2xl border p-5 shadow-sm transition', live ? 'border-cyan-400 bg-cyan-50/50' : 'border-slate-200 bg-white')}>
+    <div class="flex items-start justify-between gap-3"><div><p class="text-xs font-bold text-navy-600">${l.time}</p><h3 class="mt-1 font-display text-[15px] font-semibold text-navy-900">${l.title}</h3></div><${StatusChip} s=${l.status} /></div>
+    <p class="mt-2 text-xs text-slate-500">${l.topic}</p><p class="mt-1 text-xs text-slate-500">${l.cls} · ${l.room} · ${ROSTER.length} students</p>
+    <div class="mt-4">${l.status === 'upcoming' ? html`<button class=${cx(btn.primary, 'w-full')} onClick=${() => { if (app.startLecture(l.id)) goLive(); }}><${Icon} n="play" c="h-4 w-4" />Start Lecture</button>`
+      : l.status === 'live' ? html`<button class=${cx(btn.cyan, 'w-full')} onClick=${goLive}>Open live view</button>`
+      : html`<div class="flex items-center justify-between rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-semibold text-emerald-800"><span>${l.result.present} of ${l.result.total} present</span><span>${pct(l.result.present, l.result.total).toFixed(0)}%</span></div>`}</div></div>`;
+}
+
+function FacultyDashboard({ app, setPage }) {
+  const { st } = app;
+  const goLive = () => setPage('live');
+  const cur = st.live ? Object.keys(st.live.present).length : 0;
+  const ds = ROSTER.map((r) => ({ ...r, v: pct(st.att[r.id].CS301.p, st.att[r.id].CS301.t) }));
+  const avg = ds.reduce((a, b) => a + b.v, 0) / ds.length;
+  const low = ds.filter((s) => s.v < 75).sort((a, b) => a.v - b.v);
+  const trend = [{ label: 'Oct 1', value: 88 }, { label: 'Oct 3', value: 81 }, { label: 'Oct 5', value: 92 }, { label: 'Oct 6', value: 76 }, { label: 'Oct 8', value: 85 }, { label: 'Oct 9', value: 90 }, { label: 'Today', value: st.live ? (cur / ROSTER.length) * 100 : st.lectures.filter((l) => l.result).length ? 83 : 0 }];
+  return html`<div class="space-y-6">
+    <div class="flex flex-wrap items-end justify-between gap-4"><div><h2 class="font-display text-2xl font-bold text-navy-900">Good morning, Dr. Kulkarni</h2><p class="mt-1 text-sm text-slate-500">Monday, 12 October 2026 · 3 lectures scheduled today</p></div>
+      <button class=${btn.ghost} onClick=${goLive}><${Icon} n="qr" c="h-4 w-4" />Open live lecture</button></div>
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <${Stat} label="Lectures today" value=${3} sub=${`${st.lectures.filter((l) => l.status === 'completed').length} completed`} icon="calendar" />
+      <${Stat} label="Live attendance" value=${st.live ? `${cur}/${ROSTER.length}` : '—'} sub=${st.live ? 'Updating in real time' : 'No lecture live'} icon="users" accent="bg-rose-50 text-rose-600" />
+      <${Stat} label="Class average (DS)" value=${avg.toFixed(1) + '%'} sub="CSE-3A · Data Structures" icon="chart" accent="bg-emerald-50 text-emerald-600" />
+      <${Stat} label="Students below 75%" value=${low.length} sub="Needs follow-up" icon="alert" accent="bg-amber-50 text-amber-600" />
+    </div>
+    <div><h3 class="mb-3 font-display text-base font-semibold text-navy-900">Today's lectures</h3><div class="grid gap-4 md:grid-cols-3">${st.lectures.map((l) => html`<${LectureCard} key=${l.id} l=${l} app=${app} goLive=${goLive} />`)}</div></div>
+    <div class="grid gap-6 lg:grid-cols-2">
+      <${Card} title="Session attendance trend" sub="Data Structures · CSE-3A"><${LineChart} data=${trend.map((d) => ({ ...d, value: Math.max(60, d.value) }))} /><//>
+      <${Card} title="Needs attention" sub="Below 75% in Data Structures">${low.length ? html`<ul class="divide-y divide-slate-100">${low.map((s) => html`<li key=${s.id} class="flex items-center gap-3 py-2.5"><${Avatar} name=${s.name} c="bg-rose-50 text-rose-700" /><div class="min-w-0 flex-1"><p class="truncate text-sm font-semibold text-navy-900">${s.name}</p><p class="text-xs text-slate-500">${s.id}</p></div><span class="text-sm font-bold text-rose-600">${s.v.toFixed(1)}%</span></li>`)}</ul>` : html`<${Empty} icon="check" title="Everyone is on track" sub="No students below 75%." />`}<//>
+    </div></div>`;
+}
+
+function BLEPanel({ scanning, onSim, onFail, live }) {
+  return html`<${Card} title="BLE proximity" sub="Beacon SA-BLE-LT204 · range limit 10 m">
+    <div class="flex items-center gap-4"><div class="relative flex h-20 w-20 shrink-0 items-center justify-center">
+      ${live && [0, 1].map((i) => html`<span key=${i} class="absolute inset-0 rounded-full border-2 border-cyan-400" style=${{ animation: `ring ${scanning ? 1.1 : 2.6}s ease-out ${i * 0.9}s infinite` }}></span>`)}
+      <span class=${cx('relative flex h-12 w-12 items-center justify-center rounded-full text-white', live ? 'bg-cyan-500' : 'bg-slate-300')}><${Icon} n="bt" c="h-6 w-6" /></span></div>
+    <div class="min-w-0"><div class="flex items-center gap-2"><${Chip} kind=${live ? 'green' : 'slate'}>${live ? 'Beacon broadcasting' : 'Beacon idle'}<//></div>
+      <p class="mt-2 text-xs text-slate-500">${scanning ? 'Scanning for a student device…' : live ? 'Waiting for student devices in range' : 'Start the lecture to enable'}</p>
+      <div class="mt-2 flex items-end gap-1" aria-label="Signal strength">${[1, 2, 3, 4].map((i) => html`<span key=${i} class=${cx('w-1.5 rounded-sm', live && i <= 3 ? 'bg-cyan-500' : 'bg-slate-200')} style=${{ height: 6 + i * 4 }}></span>`)}</div></div></div>
+    <div class="mt-4 grid gap-2"><button class=${btn.cyan} disabled=${!live || scanning} onClick=${onSim}><${Icon} n="bt" c="h-4 w-4" />${scanning ? 'Verifying…' : 'Simulate BLE verification'}</button>
+      <button class=${btn.ghost} disabled=${!live || scanning} onClick=${onFail}><${Icon} n="x" c="h-4 w-4 text-rose-500" />Simulate failed attempt</button></div><//>`;
+}
+
+function FacultyLive({ app }) {
+  const { st } = app, live = st.live;
+  const lec = live && st.lectures.find((l) => l.id === live.lectureId);
+  const [q, setQ] = useState({ seed: rand(1, 1e9), left: 15 });
+  const [scanning, setScanning] = useState(false);
+  const [filter, setFilter] = useState('all'), [search, setSearch] = useState('');
+  const [sel, setSel] = useState('L1');
+  const timers = useRef([]);
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+  useEffect(() => {
+    if (!live) return;
+    const t = setInterval(() => setQ((p) => (p.left <= 1 ? { seed: rand(1, 1e9), left: 15 } : { seed: p.seed, left: p.left - 1 })), 1000);
+    return () => clearInterval(t);
+  }, [!!live]);
+
+  if (!live) {
+    const upcoming = st.lectures.filter((l) => l.status === 'upcoming');
+    const chosen = upcoming.find((l) => l.id === sel) || upcoming[0];
+    const done = st.lectures.filter((l) => l.status === 'completed');
+    return html`<div class="space-y-6"><div><h2 class="font-display text-2xl font-bold text-navy-900">Live lecture</h2><p class="mt-1 text-sm text-slate-500">Start a session to display the rotating QR and open attendance.</p></div>
+      <div class="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+        <${Card} title="Choose a lecture to start">${upcoming.length ? html`<div class="space-y-2.5">${upcoming.map((l) => html`<label key=${l.id} class=${cx('flex cursor-pointer items-center gap-3 rounded-xl border p-3.5 transition', chosen && chosen.id === l.id ? 'border-cyan-400 bg-cyan-50/60' : 'border-slate-200 hover:bg-slate-50')}><input type="radio" name="lec" checked=${chosen && chosen.id === l.id} onChange=${() => setSel(l.id)} class="accent-cyan-600" /><div class="min-w-0 flex-1"><p class="text-sm font-semibold text-navy-900">${l.title}</p><p class="text-xs text-slate-500">${l.time} · ${l.room} · ${l.cls}</p></div></label>`)}</div>
+          <button class=${cx(btn.primary, 'mt-5 w-full py-3')} onClick=${() => app.startLecture(chosen.id)}><${Icon} n="play" c="h-4 w-4" />Start Lecture</button>` : html`<${Empty} icon="check" title="All of today's lectures are complete" sub="Use Reset demo data in the top bar to run the demo again." />`}<//>
+        <${Card} title="Today so far">${done.length ? html`<ul class="divide-y divide-slate-100">${done.map((l) => html`<li key=${l.id} class="flex items-center justify-between py-3"><div><p class="text-sm font-semibold text-navy-900">${l.title}</p><p class="text-xs text-slate-500">${l.time}</p></div><${Chip} kind="green">${l.result.present}/${l.result.total} present<//></li>`)}</ul>` : html`<${Empty} icon="clock" title="No lectures completed yet" sub="Finished sessions and their attendance appear here." />`}<//>
+      </div></div>`;
+  }
+
+  const presentIds = Object.keys(live.present), cnt = presentIds.length, total = ROSTER.length, rate = pct(cnt, total);
+  const qrCount = presentIds.filter((id) => live.present[id].method === 'QR + BLE').length;
+  const rows = ROSTER.filter((s) => (filter === 'all' || (filter === 'present') === !!live.present[s.id]) && s.name.toLowerCase().includes(search.toLowerCase()));
+
+  const simBle = () => {
+    const absent = ROSTER.filter((s) => !live.present[s.id]);
+    if (!absent.length) return app.notify('info', 'Everyone is present', 'All students are already marked present.');
+    const cand = absent.filter((s) => s.id !== ME_ID);
+    const s = pick(cand.length ? cand : absent);
+    setScanning(true);
+    timers.current.push(setTimeout(() => {
+      const r = app.markPresent(s.id, 'QR + BLE');
+      setScanning(false);
+      if (r.ok) app.notify('success', 'BLE verified', `${s.name} marked present (${-rand(52, 66)} dBm).`);
+    }, 1400));
+  };
+  const simFail = () => {
+    const absent = ROSTER.filter((s) => !live.present[s.id]);
+    const s = pick(absent.length ? absent : ROSTER);
+    app.failAttempt(s.id, pick(['Outside BLE range (14 m from beacon).', 'QR token expired (older than 15 s).', 'Device appears to be in a different classroom.']));
+  };
+  const tn = tone(rate);
+  return html`<div class="space-y-6">
+    <div class="flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-navy-900 p-5 text-white">
+      <div class="flex items-center gap-4"><span class="anim-blink flex items-center gap-2 rounded-full bg-rose-500 px-3 py-1 text-xs font-bold"><span class="h-2 w-2 rounded-full bg-white"></span>LIVE</span><div><h2 class="font-display text-lg font-semibold">${lec.title}</h2><p class="text-xs text-navy-200">${lec.cls} · ${lec.room} · started ${live.startedAt} · ${lec.topic}</p></div></div>
+      <button class=${btn.danger} onClick=${app.endLecture}><${Icon} n="stop" c="h-4 w-4" />End Lecture</button></div>
+    <div class="grid gap-6 xl:grid-cols-[360px_1fr]">
+      <div class="space-y-6">
+        <${Card} title="Attendance QR" sub="Refreshes every 15 seconds" right=${html`<${Chip} kind="cyan">Token SA-${q.seed.toString(16).slice(0, 6).toUpperCase()}<//>`}>
+          <div class="flex flex-col items-center"><div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-inner"><${QR} seed=${q.seed} size=${230} /></div>
+            <div class="mt-4 w-full"><div class="mb-1.5 flex justify-between text-xs"><span class="font-semibold text-slate-500">Next code in</span><span class="font-bold text-navy-900">${q.left}s</span></div><${Bar} v=${(q.left / 15) * 100} c="bg-cyan-500" /></div></div><//>
+        <${BLEPanel} scanning=${scanning} live=${true} onSim=${simBle} onFail=${simFail} />
+      </div>
+      <div class="space-y-6">
+        <div class="grid gap-4 sm:grid-cols-3">
+          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:col-span-1"><p class="text-xs font-semibold text-slate-500">Live attendance</p><p class="mt-2 font-display text-5xl font-bold text-navy-900">${cnt}<span class="text-2xl text-slate-400">/${total}</span></p><div class="mt-3"><${Bar} v=${rate} c=${tn.bar} /></div><p class=${cx('mt-2 text-xs font-bold', tn.t)}>${rate.toFixed(0)}% present</p></div>
+          <${Stat} label="Verified by QR + BLE" value=${qrCount} sub=${`${cnt - qrCount} marked manually`} icon="shield" accent="bg-emerald-50 text-emerald-600" />
+          <${Stat} label="Rejected attempts" value=${live.failed} sub="Expired QR, out of range" icon="alert" accent="bg-rose-50 text-rose-600" />
+        </div>
+        <${Card} title="Student attendance" sub=${`${lec.cls} · ${total} students`} right=${html`<div class="flex flex-wrap gap-2">${[['all', 'All'], ['present', 'Present'], ['absent', 'Absent']].map(([k, l]) => html`<button key=${k} onClick=${() => setFilter(k)} class=${cx('rounded-lg px-3 py-1.5 text-xs font-semibold transition', filter === k ? 'bg-navy-800 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50')}>${l}</button>`)}</div>`}>
+          <div class="relative mb-3"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><${Icon} n="search" c="h-4 w-4" /></span><input value=${search} onInput=${(e) => setSearch(e.target.value)} placeholder="Search students" class="w-full rounded-xl border border-slate-200 py-2 pl-9 pr-3 text-sm" /></div>
+          ${rows.length ? html`<ul class="divide-y divide-slate-100">${rows.map((s) => { const p = live.present[s.id]; return html`<li key=${s.id} class="flex items-center gap-3 py-2.5">
+            <${Avatar} name=${s.name} c=${p ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'} />
+            <div class="min-w-0 flex-1"><p class="truncate text-sm font-semibold text-navy-900">${s.name}${s.id === ME_ID ? html` <span class="text-[11px] font-semibold text-cyan-700">(demo student)</span>` : ''}</p><p class="text-xs text-slate-500">${s.id}${p ? ` · ${p.time} · ${p.method}` : ''}</p></div>
+            ${p ? html`<${Chip} kind="green"><${Icon} n="check" c="h-3 w-3" />Present<//>` : html`<button class=${btn.sm} onClick=${() => { app.markPresent(s.id, 'Manual (faculty)'); app.notify('success', 'Marked present', `${s.name} added manually.`); }}>Mark present</button>`}</li>`; })}</ul>` : html`<${Empty} title="No students found" sub="Adjust the filter or search term." />`}<//>
+      </div></div></div>`;
+}
+
+function FacultyRoster({ app }) {
+  const { st } = app;
+  const [f, setF] = useState('all'), [q, setQ] = useState('');
+  const rows = ROSTER.map((s) => ({ ...s, v: pct(st.att[s.id].CS301.p, st.att[s.id].CS301.t), a: st.att[s.id].CS301, today: st.live ? (st.live.present[s.id] ? 'Present' : 'Absent') : '—' }))
+    .filter((s) => s.name.toLowerCase().includes(q.toLowerCase()) && (f === 'all' || (f === 'low' ? s.v < 75 : s.v >= 75))).sort((a, b) => a.v - b.v);
+  return html`<div class="space-y-6"><div class="flex flex-wrap items-end justify-between gap-3"><div><h2 class="font-display text-2xl font-bold text-navy-900">Class reports</h2><p class="mt-1 text-sm text-slate-500">Data Structures · CSE-3A · cumulative attendance</p></div>
+    <button class=${btn.ghost} onClick=${() => app.notify('info', 'Export simulated', 'In the full product this would download a CSV report.')}><${Icon} n="download" c="h-4 w-4" />Export CSV</button></div>
+    <div class="flex flex-wrap gap-3"><div class="relative min-w-[200px] flex-1"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><${Icon} n="search" c="h-4 w-4" /></span><input value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="Search students" class="w-full rounded-xl border border-slate-200 py-2.5 pl-9 pr-3 text-sm" /></div>
+      <div class="flex gap-2">${[['all', 'All'], ['low', 'Below 75%'], ['ok', '75% and above']].map(([k, l]) => html`<button key=${k} onClick=${() => setF(k)} class=${cx('rounded-xl px-4 py-2 text-sm font-semibold transition', f === k ? 'bg-navy-800 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50')}>${l}</button>`)}</div></div>
+    <${Card} pad=${false}>${rows.length ? html`<div class="overflow-x-auto"><table class="w-full min-w-[560px] text-left text-sm"><thead><tr class="border-b border-slate-100 text-xs text-slate-500"><th class="px-5 py-3 font-semibold">Student</th><th class="py-3 font-semibold">Attended</th><th class="w-44 py-3 font-semibold">Attendance</th><th class="py-3 font-semibold">Today</th><th class="px-5 py-3 text-right font-semibold">Status</th></tr></thead>
+      <tbody class="divide-y divide-slate-100">${rows.map((s) => { const tn = tone(s.v); return html`<tr key=${s.id}><td class="px-5 py-3"><div class="flex items-center gap-3"><${Avatar} name=${s.name} /><div><p class="font-semibold text-navy-900">${s.name}</p><p class="text-xs text-slate-500">${s.id}</p></div></div></td><td class="py-3 font-semibold text-navy-900">${s.a.p}/${s.a.t}</td><td class="py-3"><div class="flex items-center gap-2"><div class="flex-1"><${Bar} v=${s.v} /></div><span class=${cx('w-12 text-right text-xs font-bold', tn.t)}>${s.v.toFixed(1)}%</span></div></td><td class="py-3 text-xs text-slate-500">${s.today}</td><td class="px-5 py-3 text-right"><span class=${cx('rounded-full px-2.5 py-0.5 text-[11px] font-semibold', tn.bg, tn.t)}>${tn.label}</span></td></tr>`; })}</tbody></table></div>` : html`<${Empty} title="No students match" sub="Change the filter or search term." />`}<//></div>`;
+}
+
+/* ============================================================ */
+/*                        ADMIN PORTAL                          */
+/* ============================================================ */
+function adminData(att) {
+  const rows = STUDENTS.map((s) => ({ ...s, ...overall(att, s.id) }));
+  const tot = rows.reduce((a, r) => ({ p: a.p + r.p, t: a.t + r.t }), { p: 0, t: 0 });
+  const depts = DEPTS.map((d) => { const m = rows.filter((r) => r.dept === d.name); const p = m.reduce((a, r) => a + r.p, 0), t = m.reduce((a, r) => a + r.t, 0); return { ...d, v: pct(p, t) }; });
+  return { rows, rate: pct(tot.p, tot.t), depts, low: rows.filter((r) => r.v < 75).sort((a, b) => a.v - b.v) };
+}
+
+function AdminDashboard({ app, setPage }) {
+  const { st } = app;
+  const d = useMemo(() => adminData(st.att), [st.att]);
+  const live = st.live, cnt = live ? Object.keys(live.present).length : 0;
+  const lec = live && st.lectures.find((l) => l.id === live.lectureId);
+  const trend = [{ label: 'Oct 5', value: 86.2 }, { label: 'Oct 6', value: 84.7 }, { label: 'Oct 7', value: 85.9 }, { label: 'Oct 8', value: 81.3 }, { label: 'Oct 9', value: 83.8 }, { label: 'Today', value: d.rate }];
+  return html`<div class="space-y-6">
+    <div><h2 class="font-display text-2xl font-bold text-navy-900">Institution overview</h2><p class="mt-1 text-sm text-slate-500">Monday, 12 October 2026 · Academic year 2026–27</p></div>
+    ${live && html`<div class="anim-pop flex flex-wrap items-center gap-4 rounded-2xl border border-cyan-300 bg-cyan-50 p-4"><span class="anim-blink h-3 w-3 rounded-full bg-rose-500"></span><p class="min-w-0 flex-1 text-sm font-semibold text-navy-900">${lec.title} (${lec.cls}) is live: <span class="font-bold text-cyan-800">${cnt} of ${ROSTER.length} present</span></p></div>`}
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <${Stat} label="Total students" value="4,826" sub="Across 7 departments" icon="users" />
+      <${Stat} label="Faculty" value="212" sub="Teaching this semester" icon="cap" accent="bg-navy-50 text-navy-700" />
+      <${Stat} label="Departments" value="7" sub="All using two-factor check-in" icon="building" accent="bg-violet-50 text-violet-600" />
+      <${Stat} label="Attendance rate" value=${d.rate.toFixed(1) + '%'} sub="Sample cohort · updates live" icon="chart" accent="bg-emerald-50 text-emerald-600" />
+    </div>
+    <div class="grid gap-6 xl:grid-cols-2">
+      <${Card} title="Department-wise attendance" sub="Dashed line marks the 75% requirement"><${BarChart} data=${d.depts.map((x) => ({ label: x.short, value: x.v }))} colorFn=${(v) => tone(v).hex} /><//>
+      <${Card} title="Attendance trend" sub="Institution average, last 6 working days"><${LineChart} data=${trend} /><//>
+    </div>
+    <div class="grid gap-6 xl:grid-cols-3">
+      <${Card} class="xl:col-span-2" title="Low-attendance alerts" sub=${`${d.low.length} students below 75%`} right=${html`<button class=${btn.sm} onClick=${() => setPage('alerts')}>Manage alerts</button>`}>
+        <ul class="divide-y divide-slate-100">${d.low.slice(0, 5).map((s) => html`<li key=${s.id} class="flex items-center gap-3 py-2.5"><${Avatar} name=${s.name} c="bg-rose-50 text-rose-700" /><div class="min-w-0 flex-1"><p class="truncate text-sm font-semibold text-navy-900">${s.name}</p><p class="text-xs text-slate-500">${s.cls} · ${s.dept}</p></div><div class="w-24"><${Bar} v=${s.v} /></div><span class="w-14 text-right text-sm font-bold text-rose-600">${s.v.toFixed(1)}%</span></li>`)}</ul><//>
+      <${Card} title="Live verification feed" sub="From faculty and student actions">${st.activity.length ? html`<ul class="space-y-3">${st.activity.slice(0, 6).map((a) => html`<li key=${a.id} class="flex gap-2.5"><span class=${cx('mt-1.5 h-2 w-2 shrink-0 rounded-full', a.type === 'error' ? 'bg-rose-500' : a.type === 'success' ? 'bg-emerald-500' : 'bg-cyan-500')}></span><div><p class="text-xs font-semibold text-navy-900">${a.text}</p><p class="text-[11px] text-slate-400">${a.time}</p></div></li>`)}</ul>` : html`<${Empty} icon="bell" title="No activity yet" sub="Start a lecture as Faculty to see events stream in." />`}<//>
+    </div></div>`;
+}
+
+function AdminStudents({ app, initialDept = 'all' }) {
+  const d = useMemo(() => adminData(app.st.att), [app.st.att]);
+  const [q, setQ] = useState(''), [dept, setDept] = useState(initialDept), [stat, setStat] = useState('all'), [sort, setSort] = useState('name'), [page, setPage] = useState(0), [view, setView] = useState(null);
+  const rows = d.rows.filter((r) => (r.name.toLowerCase().includes(q.toLowerCase()) || r.id.toLowerCase().includes(q.toLowerCase())) && (dept === 'all' || r.dept === dept) && (stat === 'all' || tone(r.v).label === stat))
+    .sort((a, b) => (sort === 'name' ? a.name.localeCompare(b.name) : sort === 'low' ? a.v - b.v : b.v - a.v));
+  const per = 10, pages = Math.max(1, Math.ceil(rows.length / per)), pg = Math.min(page, pages - 1), shown = rows.slice(pg * per, pg * per + per);
+  const chg = (fn) => (e) => { fn(e.target.value); setPage(0); };
+  return html`<div class="space-y-6"><div><h2 class="font-display text-2xl font-bold text-navy-900">Students</h2><p class="mt-1 text-sm text-slate-500">Sample cohort of ${STUDENTS.length} students with live attendance</p></div>
+    <div class="flex flex-wrap gap-3"><div class="relative min-w-[220px] flex-1"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><${Icon} n="search" c="h-4 w-4" /></span><input value=${q} onInput=${chg(setQ)} placeholder="Search by name or ID" class="w-full rounded-xl border border-slate-200 py-2.5 pl-9 pr-3 text-sm" aria-label="Search students" /></div>
+      <select value=${dept} onChange=${chg(setDept)} class="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-navy-800" aria-label="Department"><option value="all">All departments</option>${DEPTS.map((x) => html`<option key=${x.name} value=${x.name}>${x.name}</option>`)}</select>
+      <select value=${stat} onChange=${chg(setStat)} class="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-navy-800" aria-label="Status"><option value="all">All statuses</option><option value="Good">Good (85%+)</option><option value="Watch">Watch (75–84%)</option><option value="Low">Low (below 75%)</option></select>
+      <select value=${sort} onChange=${chg(setSort)} class="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-navy-800" aria-label="Sort"><option value="name">Sort: name</option><option value="low">Sort: lowest first</option><option value="high">Sort: highest first</option></select></div>
+    <${Card} pad=${false}>${rows.length ? html`<div class="overflow-x-auto"><table class="w-full min-w-[640px] text-left text-sm"><thead><tr class="border-b border-slate-100 text-xs text-slate-500"><th class="px-5 py-3 font-semibold">Student</th><th class="py-3 font-semibold">Class</th><th class="py-3 font-semibold">Department</th><th class="w-44 py-3 font-semibold">Attendance</th><th class="py-3 font-semibold">Status</th><th class="px-5 py-3 text-right font-semibold">Details</th></tr></thead>
+      <tbody class="divide-y divide-slate-100">${shown.map((s) => { const tn = tone(s.v); return html`<tr key=${s.id}><td class="px-5 py-3"><div class="flex items-center gap-3"><${Avatar} name=${s.name} /><div><p class="font-semibold text-navy-900">${s.name}</p><p class="text-xs text-slate-500">${s.id}</p></div></div></td><td class="py-3 text-slate-600">${s.cls}</td><td class="py-3 text-slate-600">${s.dept}</td><td class="py-3"><div class="flex items-center gap-2"><div class="flex-1"><${Bar} v=${s.v} /></div><span class=${cx('w-12 text-right text-xs font-bold', tn.t)}>${s.v.toFixed(1)}%</span></div></td><td class="py-3"><span class=${cx('rounded-full px-2.5 py-0.5 text-[11px] font-semibold', tn.bg, tn.t)}>${tn.label}</span></td><td class="px-5 py-3 text-right"><button class=${btn.sm} onClick=${() => setView(s)}>View</button></td></tr>`; })}</tbody></table></div>
+      <div class="flex items-center justify-between border-t border-slate-100 px-5 py-3 text-xs text-slate-500"><span>Showing ${pg * per + 1}–${Math.min(rows.length, pg * per + per)} of ${rows.length}</span><div class="flex gap-2"><button class=${btn.sm} disabled=${pg === 0} onClick=${() => setPage(pg - 1)}>Previous</button><button class=${btn.sm} disabled=${pg >= pages - 1} onClick=${() => setPage(pg + 1)}>Next</button></div></div>` : html`<${Empty} title="No students match" sub="Try a different name, department or status." />`}<//>
+    ${view && html`<${Modal} onClose=${() => setView(null)}><div class="p-6"><div class="flex items-start justify-between"><div class="flex items-center gap-3"><${Avatar} name=${view.name} size="h-12 w-12 text-sm" /><div><h3 class="font-display text-lg font-bold text-navy-900">${view.name}</h3><p class="text-xs text-slate-500">${view.id} · ${view.cls} · ${view.dept}</p></div></div><button onClick=${() => setView(null)} class="rounded-lg p-1.5 hover:bg-slate-100" aria-label="Close"><${Icon} n="x" /></button></div>
+      <div class="mt-5 flex items-center gap-4 rounded-2xl bg-slate-50 p-4"><${Ring} value=${overall(app.st.att, view.id).v} size=${88} stroke=${9} /><p class="text-sm text-slate-600">Overall attendance across 5 subjects this semester.</p></div>
+      <div class="mt-5 space-y-3.5">${SUBJECTS.map((s) => { const a = app.st.att[view.id][s.code], v = pct(a.p, a.t); return html`<div key=${s.code}><div class="mb-1 flex justify-between text-xs"><span class="font-semibold text-navy-900">${s.name}</span><span class=${cx('font-bold', tone(v).t)}>${v.toFixed(1)}% · ${a.p}/${a.t}</span></div><${Bar} v=${v} /></div>`; })}</div></div><//>`}
+  </div>`;
+}
+
+function AdminDepartments({ app, openDept }) {
+  const d = useMemo(() => adminData(app.st.att), [app.st.att]);
+  return html`<div class="space-y-6"><div><h2 class="font-display text-2xl font-bold text-navy-900">Departments</h2><p class="mt-1 text-sm text-slate-500">Seven departments, all using two-factor attendance</p></div>
+    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">${d.depts.map((x) => { const tn = tone(x.v); return html`<div key=${x.name} class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div class="flex items-start justify-between gap-3"><div><h3 class="font-display text-[15px] font-semibold text-navy-900">${x.full}</h3><p class="mt-0.5 text-xs text-slate-500">HoD: ${x.hod}</p></div><span class=${cx('rounded-full px-2.5 py-0.5 text-[11px] font-bold', tn.bg, tn.t)}>${x.v.toFixed(1)}%</span></div>
+      <div class="mt-4"><${Bar} v=${x.v} /></div><div class="mt-4 flex gap-6 text-xs text-slate-500"><span><b class="text-sm text-navy-900">${x.students.toLocaleString('en-IN')}</b> students</span><span><b class="text-sm text-navy-900">${x.faculty}</b> faculty</span></div>
+      <button class=${cx(btn.sm, 'mt-4 w-full')} onClick=${() => openDept(x.name)}>View students</button></div>`; })}</div></div>`;
+}
+
+function AdminAlerts({ app }) {
+  const d = useMemo(() => adminData(app.st.att), [app.st.att]);
+  const [sent, setSent] = useState({});
+  return html`<div class="space-y-6"><div class="flex flex-wrap items-end justify-between gap-3"><div><h2 class="font-display text-2xl font-bold text-navy-900">Low-attendance alerts</h2><p class="mt-1 text-sm text-slate-500">${d.low.length} students are below the 75% requirement</p></div>
+    <button class=${btn.primary} onClick=${() => { const n = {}; d.low.forEach((s) => (n[s.id] = true)); setSent(n); app.notify('success', 'Notices sent', `${d.low.length} students and their mentors were notified (simulated).`); }}><${Icon} n="bell" c="h-4 w-4" />Notify all</button></div>
+    <${Card} pad=${false}>${d.low.length ? html`<ul class="divide-y divide-slate-100">${d.low.map((s) => html`<li key=${s.id} class="flex flex-wrap items-center gap-3 px-5 py-3.5"><${Avatar} name=${s.name} c="bg-rose-50 text-rose-700" /><div class="min-w-[160px] flex-1"><p class="text-sm font-semibold text-navy-900">${s.name}</p><p class="text-xs text-slate-500">${s.id} · ${s.cls} · ${s.dept}</p></div><div class="w-32"><${Bar} v=${s.v} /></div><span class="w-14 text-right text-sm font-bold text-rose-600">${s.v.toFixed(1)}%</span>
+      ${sent[s.id] ? html`<${Chip} kind="green"><${Icon} n="check" c="h-3 w-3" />Notice sent<//>` : html`<button class=${btn.sm} onClick=${() => { setSent({ ...sent, [s.id]: true }); app.notify('success', 'Notice sent', `${s.name} was notified (simulated).`); }}>Send notice</button>`}</li>`)}</ul>` : html`<${Empty} icon="check" title="No alerts" sub="Every student is at or above 75%." />`}<//></div>`;
+}
+
+/* ============================================================ */
+/*                            APP                               */
+/* ============================================================ */
+function App() {
+  const [st, setSt] = useState(initState);
+  const S = useRef(st);
+  const commit = (n) => { S.current = n; setSt(n); };
+  const [toasts, setToasts] = useState([]);
+  const [role, setRole] = useState(null);
+  const [page, setPage] = useState('dashboard');
+  const [scan, setScan] = useState(false);
+  const [adminDept, setAdminDept] = useState('all');
+
+  const notify = (type, title, msg) => { const id = uid(); setToasts((t) => [...t.slice(-3), { id, type, title, msg }]); setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200); };
+  const log = (s, type, text) => [{ id: uid(), type, text, time: nowStr() }, ...s.activity].slice(0, 30);
+
+  const startLecture = (id) => {
+    const s = S.current, lec = s.lectures.find((l) => l.id === id);
+    if (s.live) { notify('error', 'Another lecture is live', 'End the current lecture before starting a new one.'); return false; }
+    commit({ ...s, lectures: s.lectures.map((l) => (l.id === id ? { ...l, status: 'live' } : l)), live: { lectureId: id, present: {}, failed: 0, startedAt: nowStr() }, activity: log(s, 'info', `${lec.title} started`) });
+    notify('success', 'Lecture started', 'Rotating QR is live and the BLE beacon is broadcasting.');
+    return true;
+  };
+  const markPresent = (sid, method) => {
+    const s = S.current;
+    if (!s.live) return { ok: false };
+    if (s.live.present[sid]) return { ok: false, dup: true };
+    const lec = s.lectures.find((l) => l.id === s.live.lectureId), stu = STUDENTS.find((x) => x.id === sid), time = nowStr(), a = s.att[sid][lec.subject];
+    const att = { ...s.att, [sid]: { ...s.att[sid], [lec.subject]: { p: a.p + 1, t: a.t + 1 } } };
+    const history = sid === ME_ID ? [{ id: uid(), date: 'Today', time, subject: lec.subject, status: 'Present', method }, ...s.history] : s.history;
+    commit({ ...s, att, history, live: { ...s.live, present: { ...s.live.present, [sid]: { time, method } } }, activity: log(s, 'success', `${stu.name} verified (${method})`) });
+    return { ok: true, time, lec };
+  };
+  const failAttempt = (sid, reason) => {
+    const s = S.current, stu = STUDENTS.find((x) => x.id === sid);
+    commit({ ...s, live: s.live ? { ...s.live, failed: s.live.failed + 1 } : s.live, activity: log(s, 'error', `${stu.name}: ${reason}`) });
+    notify('error', 'Verification failed', `${stu.name}: ${reason}`);
+  };
+  const endLecture = () => {
+    const s = S.current; if (!s.live) return;
+    const lec = s.lectures.find((l) => l.id === s.live.lectureId), att = { ...s.att };
+    ROSTER.forEach((r) => { if (!s.live.present[r.id]) { const a = att[r.id][lec.subject]; att[r.id] = { ...att[r.id], [lec.subject]: { p: a.p, t: a.t + 1 } }; } });
+    const count = Object.keys(s.live.present).length;
+    const history = s.live.present[ME_ID] ? s.history : [{ id: uid(), date: 'Today', time: lec.time.slice(0, 5), subject: lec.subject, status: 'Absent', method: '—' }, ...s.history];
+    commit({ ...s, att, history, lectures: s.lectures.map((l) => (l.id === lec.id ? { ...l, status: 'completed', result: { present: count, total: ROSTER.length } } : l)), live: null, activity: log(s, 'info', `${lec.title} ended: ${count}/${ROSTER.length} present`) });
+    notify('info', 'Lecture ended', `${count} of ${ROSTER.length} students were present. Student and admin dashboards are updated.`);
+  };
+  const resetDemo = () => { commit(initState()); setScan(false); notify('info', 'Demo reset', 'Sample data restored to its starting state.'); };
+  const app = { st, notify, startLecture, markPresent, failAttempt, endLecture, resetDemo, getState: () => S.current };
+
+  const enter = (r) => { setRole(r); setPage('dashboard'); window.scrollTo(0, 0); };
+  const switchRole = (r) => { setRole(r); setPage('dashboard'); setAdminDept('all'); window.scrollTo(0, 0); };
+  const goto = (r, p) => { setRole(r); setPage(p); window.scrollTo(0, 0); };
+
+  let body = null;
+  if (role === 'student') body = page === 'attendance' ? html`<${StudentAttendance} app=${app} />` : page === 'lectures' ? html`<${StudentLectures} app=${app} />` : page === 'materials' ? html`<${StudentMaterials} app=${app} />` : html`<${StudentDashboard} app=${app} setPage=${setPage} openScan=${() => setScan(true)} />`;
+  if (role === 'faculty') body = page === 'live' ? html`<${FacultyLive} app=${app} />` : page === 'roster' ? html`<${FacultyRoster} app=${app} />` : html`<${FacultyDashboard} app=${app} setPage=${setPage} />`;
+  if (role === 'admin') body = page === 'students' ? html`<${AdminStudents} key=${adminDept} app=${app} initialDept=${adminDept} />` : page === 'departments' ? html`<${AdminDepartments} app=${app} openDept=${(n) => { setAdminDept(n); setPage('students'); }} />` : page === 'alerts' ? html`<${AdminAlerts} app=${app} />` : html`<${AdminDashboard} app=${app} setPage=${setPage} />`;
+
+  return html`<div>
+    ${role ? html`<${Shell} app=${app} role=${role} page=${page} setPage=${(p) => { setAdminDept('all'); setPage(p); }} switchRole=${switchRole} goto=${goto} onLogout=${() => setRole(null)}>${body}<//>` : html`<${Landing} onEnter=${enter} />`}
+    ${scan && role === 'student' && html`<${Scanner} app=${app} onClose=${() => setScan(false)} />`}
+    <${Toasts} items=${toasts} />
+  </div>`;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${App} />`);
+</script>
+</body>
+</html>
