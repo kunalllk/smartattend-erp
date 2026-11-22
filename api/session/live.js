@@ -1,96 +1,70 @@
-const { getSupabaseServer } = require('../lib/supabaseServer');
-const { getAttendees } = require('../lib/liveStore');
+const { createClient } = require('@supabase/supabase-js');
+
+function makeAdmin() {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
+    process.env.SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    '';
+  if (!url || !key) return null;
+  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+}
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
   const sessionId = req.query.session_id;
   if (!sessionId) {
     return res.status(400).json({ ok: false, error: 'Missing session_id' });
   }
 
-  // 1. Fetch from liveStore (in-memory fast cache)
-  const memoryAttendees = getAttendees(sessionId);
-
-  // 2. Fetch from Supabase PostgreSQL
-  let dbAttendees = [];
   try {
-    const supabaseAdmin = getSupabaseServer(true);
-    if (supabaseAdmin) {
-      let records = [];
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId);
-      
-      if (isUuid) {
-        const { data } = await supabaseAdmin
-          .from('attendance')
-          .select('id, student_id, marked_at, qr_verified, ble_verified, status')
-          .eq('lecture_session_id', sessionId)
-          .order('marked_at', { ascending: false });
-        if (data) records = data;
-      }
-
-      // If no records for specific sessionId, also check latest 20 attendance records
-      if (records.length === 0) {
-        const { data: latestData } = await supabaseAdmin
-          .from('attendance')
-          .select('id, student_id, marked_at, qr_verified, ble_verified, status')
-          .order('marked_at', { ascending: false })
-          .limit(20);
-        if (latestData) records = latestData;
-      }
-
-      if (records.length > 0) {
-        const studentIds = records.map((r) => r.student_id);
-        let profileMap = {};
-        const { data: profiles } = await supabaseAdmin
-          .from('profiles')
-          .select('id, full_name, roll_number')
-          .in('id', studentIds);
-        if (profiles) {
-          profiles.forEach((p) => { profileMap[p.id] = p; });
-        }
-
-        dbAttendees = records.map((r) => {
-          const prof = profileMap[r.student_id];
-          const timeStr = new Date(r.marked_at).toLocaleTimeString('en-IN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: true,
-          });
-          return {
-            attendance_id: r.id,
-            student_id: r.student_id,
-            name: prof?.full_name || 'Aarav Sharma',
-            roll_number: prof?.roll_number || 'S2301',
-            time: timeStr,
-            method: 'Dynamic QR',
-            status: r.status || 'Present',
-          };
-        });
-      }
+    const db = makeAdmin();
+    if (!db) {
+      return res.status(500).json({ ok: false, error: 'SUPABASE_NOT_CONFIGURED' });
     }
+
+    // Normalise session ID the same way verify.js does
+    const isSessionUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId);
+    const normalisedId = isSessionUuid ? sessionId : ('session_' + sessionId);
+
+    // Query live_attendance — no FK, always works
+    const { data: rows, error } = await db
+      .from('live_attendance')
+      .select('id, session_id, student_id, full_name, roll_number, marked_at, method, status')
+      .eq('session_id', normalisedId)
+      .order('marked_at', { ascending: false });
+
+    if (error) {
+      console.error('live_attendance query error:', error.message);
+      return res.status(500).json({ ok: false, error: error.message });
+    }
+
+    const attendees = (rows || []).map((r) => ({
+      attendance_id: r.id,
+      student_id:    r.student_id,
+      name:          r.full_name  || 'Aarav Sharma',
+      roll_number:   r.roll_number || 'S2301',
+      time:          new Date(r.marked_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+      method:        r.method || 'Dynamic QR',
+      status:        r.status || 'Present',
+    }));
+
+    return res.status(200).json({
+      ok:         true,
+      session_id: sessionId,
+      count:      attendees.length,
+      attendees,
+    });
+
   } catch (err) {
-    console.warn('Live DB query note:', err.message);
+    console.error('live handler error:', err);
+    return res.status(500).json({ ok: false, error: err.message });
   }
-
-  // 3. Merge memory attendees and DB attendees uniquely by roll_number / student_id
-  const merged = [...memoryAttendees];
-  dbAttendees.forEach((dbA) => {
-    if (!merged.some((m) => m.student_id === dbA.student_id || (dbA.roll_number && m.roll_number === dbA.roll_number))) {
-      merged.push(dbA);
-    }
-  });
-
-  return res.status(200).json({
-    ok: true,
-    session_id: sessionId,
-    count: merged.length,
-    attendees: merged,
-  });
 };
