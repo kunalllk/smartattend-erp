@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { getSupabaseServer, authenticateUser } = require('../lib/supabaseServer');
+const { setActiveSession } = require('../lib/liveStore');
 
 module.exports = async function handler(req, res) {
   // Set CORS headers
@@ -87,6 +88,8 @@ module.exports = async function handler(req, res) {
     const classId = classRec ? classRec.id : 'c1111111-1111-1111-1111-111111111111';
 
     // Call stored procedure or direct insert
+    // Always generate RFC4122 v4 UUID
+    const sessionUuid = crypto.randomUUID ? crypto.randomUUID() : 'b' + crypto.randomBytes(15).toString('hex').substring(0, 31);
     const bleSessionId = 'SA-' + crypto.randomBytes(4).toString('hex').toUpperCase();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + duration_minutes * 60000);
@@ -96,6 +99,7 @@ module.exports = async function handler(req, res) {
       const { data: sData, error: sErr } = await supabaseAdmin
         .from('lecture_sessions')
         .insert({
+          id: sessionUuid,
           faculty_id: facultyId,
           subject_id: subjectId,
           class_id: classId,
@@ -115,7 +119,7 @@ module.exports = async function handler(req, res) {
     // Resilient fallback session if table insert is restricted by RLS/anon role
     if (!session) {
       session = {
-        id: 'sess_' + Date.now(),
+        id: sessionUuid,
         faculty_id: facultyId,
         subject_id: subjectId,
         class_id: classId,
@@ -128,6 +132,9 @@ module.exports = async function handler(req, res) {
         ble_session_identifier: bleSessionId,
       };
     }
+
+    // Register active session in live store
+    setActiveSession(session);
 
     // Generate initial 15-second token
     const tokenNonce = crypto.randomBytes(12).toString('hex');

@@ -1009,6 +1009,61 @@ function App() {
 
   const log = (s, type, text) => [{ id: uid(), type, text, time: nowStr() }, ...s.activity].slice(0, 30);
 
+  // Initialize frontend Supabase client with Realtime WebSockets if configured
+  useEffect(() => {
+    fetch('/api/config')
+      .then((r) => r.json())
+      .then((cfg) => {
+        if (cfg.supabaseUrl && cfg.supabaseAnonKey && window.supabase && !window.supabaseClient) {
+          window.supabaseClient = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+          console.log('Supabase client initialized on frontend with Realtime support.');
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Cross-tab real-time sync listener (Faculty screen receives instant update if student scans in another tab)
+  useEffect(() => {
+    let bc = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        bc = new BroadcastChannel('smartattend_sync');
+        bc.onmessage = (ev) => {
+          if (ev.data && ev.data.type === 'STUDENT_SCANNED') {
+            syncLiveAttendance([{
+              student_id: ev.data.studentId,
+              roll_number: ev.data.rollNumber,
+              name: ev.data.name,
+              time: ev.data.time,
+              method: ev.data.method,
+            }]);
+          }
+        };
+      }
+    } catch (e) {}
+
+    const onStorage = (e) => {
+      if (e.key === 'smartattend_last_scan' && e.newValue) {
+        try {
+          const d = JSON.parse(e.newValue);
+          syncLiveAttendance([{
+            student_id: d.studentId,
+            roll_number: d.rollNumber,
+            name: d.name,
+            time: d.time,
+            method: d.method,
+          }]);
+        } catch (err) {}
+      }
+    };
+    window.addEventListener('storage', onStorage);
+
+    return () => {
+      if (bc) bc.close();
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
+
   // Realtime Supabase Channel Subscription
   useEffect(() => {
     // If Supabase client is available and a lecture is live, subscribe to attendance inserts
@@ -1068,7 +1123,9 @@ function App() {
       return false;
     }
 
-    let sessionId = 'sess_' + uid();
+    let sessionId = (window.crypto && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : 'b' + Math.random().toString(16).substring(2, 10) + '-0000-4000-8000-' + Date.now().toString(16).padStart(12, '0');
     let bleId = 'SA-' + Math.random().toString(36).substring(2, 8).toUpperCase();
     let initialToken = `${sessionId}:${Math.floor(Date.now() / 1000)}:init`;
 
@@ -1252,6 +1309,30 @@ function App() {
       } : currentLive,
       activity: log(s, 'success', `Aarav Sharma verified (${method || 'Dynamic QR'})`),
     });
+
+    // Cross-tab and cross-window real-time synchronization
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('smartattend_sync');
+        bc.postMessage({
+          type: 'STUDENT_SCANNED',
+          studentId: ME_ID,
+          rollNumber: 'S2301',
+          name: 'Aarav Sharma',
+          time: time || nowStr(),
+          method: method || 'Dynamic QR',
+        });
+        bc.close();
+      }
+      localStorage.setItem('smartattend_last_scan', JSON.stringify({
+        ts: Date.now(),
+        studentId: ME_ID,
+        rollNumber: 'S2301',
+        name: 'Aarav Sharma',
+        time: time || nowStr(),
+        method: method || 'Dynamic QR',
+      }));
+    } catch (e) {}
   };
 
   // Sign in to role with real Supabase Auth

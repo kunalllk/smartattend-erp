@@ -11,8 +11,8 @@ module.exports = function handler(req, res) {
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 
   return res.status(200).json({
+    ok: true,
     supabaseUrl,
     supabaseAnonKey,
-    hasServerRole: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
   });
 };

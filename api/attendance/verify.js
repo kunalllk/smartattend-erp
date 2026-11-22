@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { getSupabaseServer, authenticateUser } = require('../lib/supabaseServer');
+const { recordAttendee, getActiveSession } = require('../lib/liveStore');
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -125,11 +126,11 @@ module.exports = async function handler(req, res) {
 
     const rawSessionId = tokenParts[0];
 
-    // 4. Resolve Lecture Session (Handles Session UUID & Active Live Sessions)
-    let session = null;
+    // 4. Resolve Lecture Session (Handles In-Memory LiveStore, Session UUID & Active DB Sessions)
+    let session = getActiveSession(rawSessionId);
     const isSessionUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawSessionId);
 
-    if (isSessionUuid) {
+    if (!session && isSessionUuid) {
       const { data } = await supabaseAdmin
         .from('lecture_sessions')
         .select('id, faculty_id, subject_id, class_id, title, room, status, expires_at, ble_session_identifier, ble_rssi_threshold')
@@ -302,6 +303,21 @@ module.exports = async function handler(req, res) {
     }
 
     const timeFormatted = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    // Record into liveStore so /api/session/live returns it immediately to faculty screen
+    const liveRecord = {
+      attendance_id: attendanceRecord?.id || 'att_' + Date.now(),
+      student_id: studentId,
+      name: student.full_name || 'Aarav Sharma',
+      roll_number: student.roll_number || 'S2301',
+      time: timeFormatted,
+      method: 'Dynamic QR',
+      status: 'Present',
+    };
+    recordAttendee(sessionId, liveRecord);
+    if (rawSessionId && rawSessionId !== sessionId) {
+      recordAttendee(rawSessionId, liveRecord);
+    }
 
     return res.status(200).json({
       ok: true,
