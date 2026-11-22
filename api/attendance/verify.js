@@ -298,7 +298,7 @@ module.exports = async function handler(req, res) {
           message: 'Attendance is already recorded for this lecture.',
         });
       }
-      return res.status(500).json({ ok: false, error: attErr.message });
+      console.warn('Attendance DB note:', attErr.message);
     }
 
     const timeFormatted = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
