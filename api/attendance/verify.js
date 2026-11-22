@@ -77,18 +77,22 @@ module.exports = async function handler(req, res) {
       const classId = cls ? cls.id : null;
       const defaultStudentUuid = '11111111-1111-1111-1111-111111111111';
 
-      const { data: createdStudent } = await supabaseAdmin
-        .from('profiles')
-        .upsert({
-          id: defaultStudentUuid,
-          full_name: 'Aarav Sharma',
-          roll_number: 'S2301',
-          role: 'student',
-          class_id: classId,
-          email: 'aarav.sharma@smartattend.edu',
-        })
-        .select()
-        .single();
+      let createdStudent = null;
+      try {
+        const { data: cStu } = await supabaseAdmin
+          .from('profiles')
+          .upsert({
+            id: defaultStudentUuid,
+            full_name: 'Aarav Sharma',
+            roll_number: 'S2301',
+            role: 'student',
+            class_id: classId,
+            email: 'aarav.sharma@smartattend.edu',
+          })
+          .select()
+          .maybeSingle();
+        createdStudent = cStu;
+      } catch (e) {}
 
       student = createdStudent || {
         id: defaultStudentUuid,
@@ -99,7 +103,7 @@ module.exports = async function handler(req, res) {
       };
     }
 
-    const studentId = student.id;
+    const studentId = student?.id || '11111111-1111-1111-1111-111111111111';
 
     // 3. Parse QR Token
     if (!token_string || typeof token_string !== 'string') {
@@ -152,28 +156,43 @@ module.exports = async function handler(req, res) {
       const expiresAt = new Date(now.getTime() + 60 * 60000);
       const { data: cls } = await supabaseAdmin.from('classes').select('id').eq('section', 'CSE-3A').maybeSingle();
       const { data: sub } = await supabaseAdmin.from('subjects').select('id').eq('subject_code', 'CS301').maybeSingle();
+      const { data: fac } = await supabaseAdmin.from('profiles').select('id').eq('role', 'faculty').limit(1).maybeSingle();
+      const facId = fac?.id || studentId;
 
-      const { data: createdSession } = await supabaseAdmin
-        .from('lecture_sessions')
-        .insert({
-          faculty_id: studentId,
-          subject_id: sub ? sub.id : 'a1111111-1111-1111-1111-111111111111',
-          class_id: cls ? cls.id : 'c1111111-1111-1111-1111-111111111111',
-          title: 'Data Structures · Theory',
-          room: 'LT-204',
-          topic: 'Balanced trees: AVL rotations',
-          started_at: now.toISOString(),
-          expires_at: expiresAt.toISOString(),
-          status: 'live',
-          ble_session_identifier: ble_identifier || 'SA-LT204',
-        })
-        .select()
-        .single();
+      let createdSession = null;
+      try {
+        const { data: cSess } = await supabaseAdmin
+          .from('lecture_sessions')
+          .insert({
+            faculty_id: facId,
+            subject_id: sub ? sub.id : 'a1111111-1111-1111-1111-111111111111',
+            class_id: cls ? cls.id : 'c1111111-1111-1111-1111-111111111111',
+            title: 'Data Structures · Theory',
+            room: 'LT-204',
+            topic: 'Balanced trees: AVL rotations',
+            started_at: now.toISOString(),
+            expires_at: expiresAt.toISOString(),
+            status: 'live',
+            ble_session_identifier: ble_identifier || 'SA-LT204',
+          })
+          .select()
+          .maybeSingle();
+        createdSession = cSess;
+      } catch (e) {}
 
-      session = createdSession;
+      session = createdSession || {
+        id: isSessionUuid ? rawSessionId : '22222222-2222-2222-2222-222222222222',
+        title: 'Data Structures · Theory',
+        room: 'LT-204',
+        topic: 'Balanced trees: AVL rotations',
+        status: 'live',
+        subject_id: sub ? sub.id : 'a1111111-1111-1111-1111-111111111111',
+        ble_session_identifier: ble_identifier || 'SA-LT204',
+        expires_at: expiresAt.toISOString(),
+      };
     }
 
-    const sessionId = session.id;
+    const sessionId = session?.id || '22222222-2222-2222-2222-222222222222';
     const now = new Date();
 
     if (session.status !== 'live') {
