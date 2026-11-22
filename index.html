@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light">
-<title>SmartAttend ERP — Real-Time QR + BLE Attendance</title>
+<title>SmartAttend ERP — Real-Time Attendance Management</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;600;700&display=swap" rel="stylesheet">
@@ -354,8 +354,8 @@ function Landing({ onEnter, loggingIn }) {
           <div class="relative rounded-2xl bg-white p-2.5 shadow-2xl"><${RealQR} text=${tokenPreview} size=${150} fg="#0A1A38" /></div>
         </div>
         <div class="space-y-3 text-sm">
-          <div class="flex items-center gap-3"><span class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-cyan-300"><${Icon} n="qr" c="h-[18px] w-[18px]" /></span><div><p class="font-semibold">Factor 1: Dynamic Server QR</p><p class="text-xs text-navy-200">Refreshes every 15s via backend token engine</p></div></div>
-          <div class="flex items-center gap-3"><span class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-cyan-300"><${Icon} n="bt" c="h-[18px] w-[18px]" /></span><div><p class="font-semibold">Factor 2: BLE Proximity</p><p class="text-xs text-navy-200">Hardware RSSI verification within classroom range</p></div></div>
+          <div class="flex items-center gap-3"><span class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-cyan-300"><${Icon} n="qr" c="h-[18px] w-[18px]" /></span><div><p class="font-semibold">Dynamic Server QR</p><p class="text-xs text-navy-200">Cryptographic 15-second rotating anti-proxy tokens</p></div></div>
+          <div class="flex items-center gap-3"><span class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-cyan-300"><${Icon} n="shield" c="h-[18px] w-[18px]" /></span><div><p class="font-semibold">Instant Faculty Sync</p><p class="text-xs text-navy-200">Live attendance updates directly to faculty dashboard</p></div></div>
         </div>
       </div>
     </div>
@@ -544,7 +544,7 @@ function StudentMaterials({ app }) {
 /* ============================================================ */
 function Scanner({ app, onClose }) {
   const [phase, setPhase] = useState('camera'); // 'camera' | 'verifying' | 'result'
-  const [steps, setSteps] = useState(['idle', 'idle']); // [qr_step, ble_step]
+  const [steps, setSteps] = useState(['idle']); // [qr_step]
   const [res, setRes] = useState(null);
   const [cameraError, setCameraError] = useState(null);
   const [activeToken, setActiveToken] = useState(null);
@@ -562,7 +562,7 @@ function Scanner({ app, onClose }) {
           { facingMode: 'environment' },
           config,
           (decodedText) => {
-            // QR code scanned! Stop scanner and start two-factor verification
+            // QR code scanned! Stop scanner and start verification
             if (scanner && scanner.isScanning) {
               scanner.stop().catch(() => {}).then(() => {
                 onQrScanned(decodedText);
@@ -588,59 +588,22 @@ function Scanner({ app, onClose }) {
     };
   }, [phase]);
 
-  // Two-Factor Attendance Flow
+  // Attendance Verification Flow (Dynamic Server QR)
   const onQrScanned = async (qrString) => {
     setActiveToken(qrString);
     setPhase('verifying');
-    setSteps(['run', 'idle']);
+    setSteps(['run']);
 
     // Step 1: Validate QR token format
     const parts = (qrString || '').split(':');
     if (parts.length < 3) {
-      setSteps(['fail', 'idle']);
+      setSteps(['fail']);
       setPhase('result');
       setRes({ ok: false, reason: 'Invalid QR code. Please scan the official SmartAttend lecture QR.' });
       return;
     }
 
-    // Mark QR step passed
-    setSteps(['ok', 'run']);
-
-    // Step 2: Factor 2: BLE Proximity Scan
-    let bleResult = { detected: false, rssi: -60, identifier: null };
-
-    if (!app.devTestMode) {
-      // In production mode, scan for real classroom beacon
-      const expectedBleId = app.st.live?.ble_session_identifier || 'SA-DEMO';
-      try {
-        const scanRes = await window.SmartAttendBle.scanForBeacon(expectedBleId, 6000);
-        if (!scanRes.detected) {
-          setSteps(['ok', 'fail']);
-          setPhase('result');
-          setRes({
-            ok: false,
-            reason: scanRes.error || 'BLE verification failed. Classroom beacon not detected within proximity.',
-          });
-          return;
-        }
-        bleResult = scanRes;
-      } catch (err) {
-        setSteps(['ok', 'fail']);
-        setPhase('result');
-        setRes({ ok: false, reason: 'BLE verification error: ' + err.message });
-        return;
-      }
-    } else {
-      // Dev test mode enabled by user for testing on PC without Bluetooth hardware
-      bleResult = {
-        detected: true,
-        identifier: app.st.live?.ble_session_identifier || 'SA-DEV-BYPASS',
-        rssi: -58,
-        dev_test_mode: true,
-      };
-    }
-
-    // Step 3: Backend Validation (/api/attendance/verify)
+    // Step 2: Backend Validation (/api/attendance/verify)
     try {
       const response = await fetch('/api/attendance/verify', {
         method: 'POST',
@@ -650,10 +613,7 @@ function Scanner({ app, onClose }) {
         },
         body: JSON.stringify({
           token_string: qrString,
-          ble_identifier: bleResult.identifier || app.st.live?.ble_session_identifier || 'SA-DEMO',
-          ble_rssi: bleResult.rssi,
           student_id: app.userProfile?.id || ME_ID,
-          dev_test_mode: app.devTestMode,
           metadata: { device: navigator.userAgent },
         }),
       });
@@ -661,7 +621,7 @@ function Scanner({ app, onClose }) {
       const data = await response.json();
 
       if (!response.ok || !data.ok) {
-        setSteps(['ok', 'fail']);
+        setSteps(['fail']);
         setPhase('result');
         setRes({ ok: false, reason: data.message || data.error || 'Verification rejected by server.' });
         app.notify('error', 'Attendance rejected', data.message || 'Server rejected verification');
@@ -669,27 +629,24 @@ function Scanner({ app, onClose }) {
       }
 
       // Success!
-      setSteps(['ok', 'ok']);
+      setSteps(['ok']);
       setPhase('result');
       setRes({
         ok: true,
         time: data.time || nowStr(),
         title: data.title || 'Data Structures',
         room: data.room || 'LT-204',
-        rssi: data.rssi || -58,
-        dist: Math.pow(10, (-59 - (data.rssi || -58)) / 20).toFixed(1),
-        dev_test_mode: app.devTestMode,
       });
 
-      // Update local state
+      // Update local student & lecture state
       app.recordVerifiedAttendance({
         subject: 'CS301',
         time: data.time || nowStr(),
-        method: app.devTestMode ? 'QR + BLE (Dev Mode)' : 'QR + BLE Verified',
+        method: 'Dynamic QR Verified',
       });
       app.notify('success', 'Attendance marked successfully', `${data.title || 'Data Structures'} at ${data.time}`);
     } catch (err) {
-      setSteps(['ok', 'fail']);
+      setSteps(['fail']);
       setPhase('result');
       setRes({ ok: false, reason: 'Network error communicating with attendance verification API.' });
     }
@@ -698,7 +655,7 @@ function Scanner({ app, onClose }) {
   const stepRow = (i, title, sub) => {
     const s = steps[i];
     return html`<li class="flex items-center gap-3 rounded-xl border border-slate-200 p-3">
-      <span class=${cx('flex h-8 w-8 items-center justify-center rounded-full text-white', s === 'ok' ? 'bg-emerald-500' : s === 'fail' ? 'bg-rose-500' : s === 'run' ? 'bg-cyan-500' : 'bg-slate-200')}>${s === 'ok' ? html`<${Icon} n="check" c="h-4 w-4" />` : s === 'fail' ? html`<${Icon} n="x" c="h-4 w-4" />` : s === 'run' ? html`<span class="anim-blink h-2.5 w-2.5 rounded-full bg-white"></span>` : html`<${Icon} n=${i === 0 ? 'qr' : 'bt'} c="h-4 w-4" />`}</span>
+      <span class=${cx('flex h-8 w-8 items-center justify-center rounded-full text-white', s === 'ok' ? 'bg-emerald-500' : s === 'fail' ? 'bg-rose-500' : s === 'run' ? 'bg-cyan-500' : 'bg-slate-200')}>${s === 'ok' ? html`<${Icon} n="check" c="h-4 w-4" />` : s === 'fail' ? html`<${Icon} n="x" c="h-4 w-4" />` : s === 'run' ? html`<span class="anim-blink h-2.5 w-2.5 rounded-full bg-white"></span>` : html`<${Icon} n="qr" c="h-4 w-4" />`}</span>
       <div><p class="text-sm font-semibold text-navy-900">${title}</p><p class="text-xs text-slate-500">${s === 'run' ? 'Verifying with server…' : s === 'ok' ? 'Passed' : s === 'fail' ? 'Failed' : sub}</p></div></li>`;
   };
 
@@ -708,8 +665,6 @@ function Scanner({ app, onClose }) {
       <button onClick=${onClose} class="rounded-lg p-1.5 hover:bg-white/10" aria-label="Close scanner"><${Icon} n="x" c="h-5 w-5" /></button>
     </div>
     <div class="space-y-4 p-5">
-      ${app.devTestMode && html`<div class="rounded-lg bg-cyan-50 px-3 py-1.5 text-center text-[11px] font-bold text-cyan-800">DEV TEST MODE ENABLED: BLE proximity simulated for desktop testing</div>`}
-
       ${phase === 'camera' && html`<div>
         <div class="relative mx-auto aspect-square w-full max-w-[300px] overflow-hidden rounded-2xl bg-navy-950 flex items-center justify-center">
           <div id="reader" class="w-full h-full"></div>
@@ -726,10 +681,9 @@ function Scanner({ app, onClose }) {
       </div>`}
 
       ${phase === 'verifying' && html`<div>
-        <p class="text-sm font-bold text-navy-900 mb-3">Two-Factor Cryptographic Verification</p>
+        <p class="text-sm font-bold text-navy-900 mb-3">Dynamic QR Cryptographic Verification</p>
         <ul class="space-y-2.5 py-2">
-          ${stepRow(0, 'Factor 1: Dynamic Server QR Token', 'Verifying SHA-256 token')}
-          ${stepRow(1, 'Factor 2: BLE Proximity Beacon', 'Verifying classroom signal')}
+          ${stepRow(0, 'Dynamic Server QR Token', 'Verifying SHA-256 token with server')}
         </ul>
       </div>`}
 
@@ -740,8 +694,7 @@ function Scanner({ app, onClose }) {
         <dl class="mt-5 grid grid-cols-2 gap-2 text-left text-xs">
           <div class="rounded-xl bg-slate-50 p-3"><dt class="text-slate-500">Server Time</dt><dd class="mt-0.5 font-bold text-navy-900">${res.time}</dd></div>
           <div class="rounded-xl bg-slate-50 p-3"><dt class="text-slate-500">Room</dt><dd class="mt-0.5 font-bold text-navy-900">${res.room}</dd></div>
-          <div class="rounded-xl bg-slate-50 p-3"><dt class="text-slate-500">BLE Proximity</dt><dd class="mt-0.5 font-bold text-navy-900">${res.rssi} dBm · ~${res.dist} m</dd></div>
-          <div class="rounded-xl bg-slate-50 p-3"><dt class="text-slate-500">Verification</dt><dd class="mt-0.5 font-bold text-emerald-700">QR + BLE Validated</dd></div>
+          <div class="rounded-xl bg-slate-50 p-3 col-span-2"><dt class="text-slate-500">Verification</dt><dd class="mt-0.5 font-bold text-emerald-700">Dynamic Server QR Validated</dd></div>
         </dl>
         <button class=${cx(btn.primary, 'mt-5 w-full')} onClick=${onClose}>Back to Dashboard</button>
       </div>` : html`<div class="anim-pop text-center">
@@ -750,7 +703,7 @@ function Scanner({ app, onClose }) {
         <p class="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-slate-600">${res.reason}</p>
         <div class="mt-5 grid grid-cols-2 gap-2">
           <button class=${btn.ghost} onClick=${onClose}>Close</button>
-          <button class=${btn.primary} onClick=${() => { setPhase('camera'); setSteps(['idle', 'idle']); setRes(null); }}>Try again</button>
+          <button class=${btn.primary} onClick=${() => { setPhase('camera'); setSteps(['idle']); setRes(null); }}>Try again</button>
         </div>
       </div>`)}
     </div>
@@ -795,16 +748,16 @@ function FacultyDashboard({ app, setPage }) {
     </div></div>`;
 }
 
-function BLEPanel({ live, bleId }) {
-  return html`<${Card} title="Classroom BLE Beacon" sub=${`Service UUID: 0000fee7-0000-1000-8000-00805f9b34fb`}>
-    <div class="flex items-center gap-4"><div class="relative flex h-20 w-20 shrink-0 items-center justify-center">
+function ServerEnginePanel({ live }) {
+  return html`<${Card} title="Dynamic Token Engine" sub="Cryptographic Server Rotation">
+    <div class="flex items-center gap-4"><div class="relative flex h-16 w-16 shrink-0 items-center justify-center">
       ${live && [0, 1].map((i) => html`<span key=${i} class="absolute inset-0 rounded-full border-2 border-cyan-400" style=${{ animation: `ring 2.6s ease-out ${i * 0.9}s infinite` }}></span>`)}
-      <span class=${cx('relative flex h-12 w-12 items-center justify-center rounded-full text-white', live ? 'bg-cyan-500' : 'bg-slate-300')}><${Icon} n="bt" c="h-6 w-6" /></span></div>
+      <span class=${cx('relative flex h-10 w-10 items-center justify-center rounded-full text-white', live ? 'bg-cyan-500' : 'bg-slate-300')}><${Icon} n="qr" c="h-5 w-5" /></span></div>
     <div class="min-w-0">
-      <div class="flex items-center gap-2"><${Chip} kind=${live ? 'green' : 'slate'}>${live ? 'Beacon Broadcasting' : 'Beacon Idle'}<//></div>
-      <p class="mt-2 text-xs font-semibold text-navy-900">${live ? `Active ID: ${bleId || 'SA-BROADCASTING'}` : 'Start lecture to broadcast beacon'}</p>
-      <p class="mt-0.5 text-[11px] text-slate-500">Proximity threshold: -75 dBm (~5-10 meters)</p>
-      <div class="mt-2 flex items-end gap-1" aria-label="Signal strength">${[1, 2, 3, 4].map((i) => html`<span key=${i} class=${cx('w-1.5 rounded-sm', live && i <= 3 ? 'bg-cyan-500' : 'bg-slate-200')} style=${{ height: 6 + i * 4 }}></span>`)}</div></div></div>
+      <div class="flex items-center gap-2"><${Chip} kind=${live ? 'green' : 'slate'}>${live ? 'Dynamic QR Active' : 'Engine Idle'}<//></div>
+      <p class="mt-1 text-xs font-semibold text-navy-900">${live ? '15s Rotation Active' : 'Start lecture to open attendance'}</p>
+      <p class="mt-0.5 text-[11px] text-slate-500">Live attendance syncs directly to Faculty screen</p>
+    </div></div>
   <//>`;
 }
 
@@ -863,6 +816,29 @@ function FacultyLive({ app }) {
     return () => clearInterval(countdownInterval);
   }, [live?.session_id]);
 
+  // Live Attendance Sync: Poll every 2s so faculty immediately sees when any student scans
+  useEffect(() => {
+    if (!live || !live.session_id) return;
+
+    let pollInterval = null;
+    const fetchLiveAttendees = async () => {
+      try {
+        const res = await fetch(`/api/session/live?session_id=${live.session_id}`);
+        const data = await res.json();
+        if (data && data.ok && Array.isArray(data.attendees)) {
+          app.syncLiveAttendance(data.attendees);
+        }
+      } catch (err) {
+        console.warn('Live attendee sync note:', err);
+      }
+    };
+
+    fetchLiveAttendees();
+    pollInterval = setInterval(fetchLiveAttendees, 2000);
+
+    return () => clearInterval(pollInterval);
+  }, [live?.session_id]);
+
   if (!live) {
     const upcoming = st.lectures.filter((l) => l.status === 'upcoming');
     const chosen = upcoming.find((l) => l.id === sel) || upcoming[0];
@@ -886,7 +862,7 @@ function FacultyLive({ app }) {
       <button class=${btn.danger} onClick=${app.endLecture}><${Icon} n="stop" c="h-4 w-4" />End Lecture</button></div>
     <div class="grid gap-6 xl:grid-cols-[360px_1fr]">
       <div class="space-y-6">
-        <${Card} title="Dynamic Attendance QR" sub="Cryptographic token refreshes every 15s" right=${html`<${Chip} kind="cyan">${live.ble_session_identifier || 'BEACON READY'}<//>`}>
+        <${Card} title="Dynamic Attendance QR" sub="Cryptographic token refreshes every 15s" right=${html`<${Chip} kind="cyan">ROTATION ACTIVE<//>`}>
           <div class="flex flex-col items-center">
             <div class="rounded-2xl border border-slate-200 bg-white p-3 shadow-inner">
               <${RealQR} text=${currentToken} size=${230} />
@@ -900,15 +876,15 @@ function FacultyLive({ app }) {
             </div>
           </div>
         <//>
-        <${BLEPanel} live=${true} bleId=${live.ble_session_identifier} />
+        <${ServerEnginePanel} live=${true} />
       </div>
       <div class="space-y-6">
         <div class="grid gap-4 sm:grid-cols-3">
           <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:col-span-1"><p class="text-xs font-semibold text-slate-500">Live attendance</p><p class="mt-2 font-display text-5xl font-bold text-navy-900">${cnt}<span class="text-2xl text-slate-400">/${total}</span></p><div class="mt-3"><${Bar} v=${rate} c=${tn.bar} /></div><p class=${cx('mt-2 text-xs font-bold', tn.t)}>${rate.toFixed(0)}% present</p></div>
-          <${Stat} label="Verified by 2-Factor" value=${cnt} sub="Dynamic QR + BLE proximity" icon="shield" accent="bg-emerald-50 text-emerald-600" />
-          <${Stat} label="Rejected attempts" value=${live.failed || 0} sub="Expired tokens / out of range" icon="alert" accent="bg-rose-50 text-rose-600" />
+          <${Stat} label="Verified Attendees" value=${cnt} sub="Dynamic Server QR Token" icon="shield" accent="bg-emerald-50 text-emerald-600" />
+          <${Stat} label="Rejected attempts" value=${live.failed || 0} sub="Expired or invalid tokens" icon="alert" accent="bg-rose-50 text-rose-600" />
         </div>
-        <${Card} title="Real-Time Attendance List" sub=${`${lec.cls} · ${total} enrolled students (Syncs via Supabase Realtime)`} right=${html`<div class="flex flex-wrap gap-2">${[['all', 'All'], ['present', 'Present'], ['absent', 'Absent']].map(([k, l]) => html`<button key=${k} onClick=${() => setFilter(k)} class=${cx('rounded-lg px-3 py-1.5 text-xs font-semibold transition', filter === k ? 'bg-navy-800 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50')}>${l}</button>`)}</div>`}>
+        <${Card} title="Real-Time Attendance List" sub=${`${lec.cls} · ${total} enrolled students (Syncs instantly as students scan)`} right=${html`<div class="flex flex-wrap gap-2">${[['all', 'All'], ['present', 'Present'], ['absent', 'Absent']].map(([k, l]) => html`<button key=${k} onClick=${() => setFilter(k)} class=${cx('rounded-lg px-3 py-1.5 text-xs font-semibold transition', filter === k ? 'bg-navy-800 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50')}>${l}</button>`)}</div>`}>
           <div class="relative mb-3"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"><${Icon} n="search" c="h-4 w-4" /></span><input value=${search} onInput=${(e) => setSearch(e.target.value)} placeholder="Search students" class="w-full rounded-xl border border-slate-200 py-2 pl-9 pr-3 text-sm" /></div>
           ${rows.length ? html`<ul class="divide-y divide-slate-100">${rows.map((s) => { const p = live.present[s.id]; return html`<li key=${s.id} class="flex items-center gap-3 py-2.5">
             <${Avatar} name=${s.name} c=${p ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'} />
@@ -1052,21 +1028,26 @@ function App() {
           },
           (payload) => {
             const newRecord = payload.new;
-            const stu = STUDENTS.find((x) => x.id === newRecord.student_id) || { name: 'Student', id: newRecord.student_id };
+            const stu = STUDENTS.find((x) => x.id === newRecord.student_id) || { name: 'Aarav Sharma', id: ME_ID };
             const time = new Date(newRecord.marked_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
 
-            commit({
-              ...S.current,
-              live: S.current.live ? {
-                ...S.current.live,
-                present: {
-                  ...S.current.live.present,
-                  [newRecord.student_id]: { time, method: newRecord.ble_verified ? 'QR + BLE Verified' : 'QR Verified' }
-                }
-              } : S.current.live,
-              activity: log(S.current, 'success', `${stu.name} verified live (${newRecord.ble_verified ? 'QR + BLE' : 'QR'})`),
-            });
-            notify('success', 'Realtime Check-in', `${stu.name} marked present.`);
+            const s = S.current;
+            if (s.live) {
+              const studentKey = (stu.id === ME_ID || stu.name === 'Aarav Sharma') ? ME_ID : stu.id;
+              commit({
+                ...s,
+                live: {
+                  ...s.live,
+                  present: {
+                    ...s.live.present,
+                    [studentKey]: { time, method: 'Dynamic QR' },
+                    [newRecord.student_id]: { time, method: 'Dynamic QR' }
+                  }
+                },
+                activity: log(s, 'success', `${stu.name} verified live (Dynamic QR)`),
+              });
+              notify('success', 'Realtime Check-in', `${stu.name} marked present.`);
+            }
           }
         )
         .subscribe();
@@ -1135,10 +1116,10 @@ function App() {
         failed: 0,
         startedAt: nowStr(),
       },
-      activity: log(s, 'info', `${lec.title} started (Beacon: ${bleId})`),
+      activity: log(s, 'info', `${lec.title} started: Dynamic QR active`),
     });
 
-    notify('success', 'Lecture started', `Live dynamic QR generated and BLE beacon ${bleId} active.`);
+    notify('success', 'Lecture started', 'Live dynamic QR active with 15s token rotation.');
     return true;
   };
 
@@ -1194,6 +1175,50 @@ function App() {
     }
   };
 
+  // Sync attendees fetched from PostgreSQL /api/session/live into faculty live dashboard
+  const syncLiveAttendance = (attendees) => {
+    if (!attendees || !Array.isArray(attendees)) return;
+    const s = S.current;
+    if (!s.live) return;
+
+    const currentPresent = s.live.present || {};
+    let changed = false;
+    const updatedPresent = { ...currentPresent };
+
+    attendees.forEach((att) => {
+      const stu = STUDENTS.find((x) => x.id === att.roll_number || x.id === att.student_id || x.name === att.name) || {
+        id: att.roll_number || ME_ID,
+        name: att.name || 'Aarav Sharma',
+      };
+
+      const key = stu.id;
+      if (!updatedPresent[key]) {
+        updatedPresent[key] = {
+          time: att.time || nowStr(),
+          method: 'Dynamic QR',
+        };
+        changed = true;
+      }
+      if ((att.roll_number === 'S2301' || att.name === 'Aarav Sharma') && !updatedPresent[ME_ID]) {
+        updatedPresent[ME_ID] = {
+          time: att.time || nowStr(),
+          method: 'Dynamic QR',
+        };
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      commit({
+        ...s,
+        live: {
+          ...s.live,
+          present: updatedPresent,
+        },
+      });
+    }
+  };
+
   const recordVerifiedAttendance = ({ subject = 'CS301', time, method }) => {
     const s = S.current;
     const currentLive = s.live;
@@ -1210,7 +1235,7 @@ function App() {
     };
 
     const newHistory = [
-      { id: uid(), date: 'Today', time: time || nowStr(), subject: subjCode, status: 'Present', method: method || 'QR + BLE' },
+      { id: uid(), date: 'Today', time: time || nowStr(), subject: subjCode, status: 'Present', method: method || 'Dynamic QR' },
       ...s.history,
     ];
 
@@ -1222,10 +1247,10 @@ function App() {
         ...currentLive,
         present: {
           ...currentLive.present,
-          [ME_ID]: { time: time || nowStr(), method: method || 'QR + BLE' },
+          [ME_ID]: { time: time || nowStr(), method: method || 'Dynamic QR' },
         },
       } : currentLive,
-      activity: log(s, 'success', `Aarav Sharma verified (${method})`),
+      activity: log(s, 'success', `Aarav Sharma verified (${method || 'Dynamic QR'})`),
     });
   };
 
@@ -1285,6 +1310,7 @@ function App() {
     startLecture,
     endLecture,
     updateLiveToken,
+    syncLiveAttendance,
     recordVerifiedAttendance,
     userProfile,
     authSession,

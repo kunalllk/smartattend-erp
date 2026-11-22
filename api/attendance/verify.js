@@ -267,28 +267,10 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // 7. FACTOR 2: Verify Bluetooth Low Energy Proximity
-    if (!dev_test_mode) {
-      if (!ble_identifier) {
-        return res.status(400).json({
-          ok: false,
-          error_code: 'BLE_NOT_DETECTED',
-          message: 'Bluetooth Low Energy classroom beacon was not detected. Ensure Bluetooth is ON and you are inside the classroom.',
-        });
-      }
-
-      const threshold = session.ble_rssi_threshold || -80;
-      if (ble_rssi !== undefined && ble_rssi !== null && Number(ble_rssi) < threshold) {
-        return res.status(400).json({
-          ok: false,
-          error_code: 'BLE_TOO_FAR',
-          message: `BLE signal is too weak (${ble_rssi} dBm < threshold ${threshold} dBm). Move closer to the classroom beacon.`,
-        });
-      }
-    }
+    // 7. FACTOR 1 VERIFIED: Dynamic QR Code Authenticated
+    // (Factor 2 BLE removed per requirement - attendance verified purely by Dynamic Rotating QR)
 
     // 8. Record Verified Attendance in PostgreSQL
-    const rssiVal = ble_rssi ? Number(ble_rssi) : -58;
     const { data: attendanceRecord, error: attErr } = await supabaseAdmin
       .from('attendance')
       .insert({
@@ -297,12 +279,10 @@ module.exports = async function handler(req, res) {
         subject_id: session.subject_id,
         marked_at: now.toISOString(),
         qr_verified: true,
-        ble_verified: !dev_test_mode,
+        ble_verified: false,
         status: 'Present',
         verification_metadata: {
-          rssi: rssiVal,
-          ble_identifier: ble_identifier || session.ble_session_identifier,
-          dev_test_mode: !!dev_test_mode,
+          factor: 'Dynamic QR',
           user_agent: req.headers['user-agent'] || '',
           client_meta: metadata,
         },
@@ -335,8 +315,8 @@ module.exports = async function handler(req, res) {
       room: session.room,
       time: timeFormatted,
       qr_verified: true,
-      ble_verified: !dev_test_mode,
-      rssi: rssiVal,
+      ble_verified: false,
+      method: 'Dynamic QR Verified',
     });
   } catch (err) {
     console.error('Attendance verification error:', err);
