@@ -56,12 +56,14 @@ module.exports = async function handler(req, res) {
       }
 
       if (facUuid) {
-        await supabaseAdmin.from('profiles').upsert({
-          id: facUuid,
-          full_name: 'Dr. Meera Kulkarni',
-          role: 'faculty',
-          email: 'meera.kulkarni@smartattend.edu',
-        }).catch(() => {});
+        try {
+          await supabaseAdmin.from('profiles').upsert({
+            id: facUuid,
+            full_name: 'Dr. Meera Kulkarni',
+            role: 'faculty',
+            email: 'meera.kulkarni@smartattend.edu',
+          });
+        } catch (e) {}
         facultyId = facUuid;
       } else {
         facultyId = '22222222-2222-2222-2222-222222222222';

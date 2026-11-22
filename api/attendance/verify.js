@@ -244,12 +244,14 @@ module.exports = async function handler(req, res) {
       const nowSec = Math.floor(Date.now() / 1000);
       // Acceptable window: 30 seconds
       if (tokenTimestamp && Math.abs(nowSec - tokenTimestamp) <= 30) {
-        await supabaseAdmin.from('attendance_tokens').insert({
-          session_id: sessionId,
-          token_hash: tokenHash,
-          created_at: new Date(tokenTimestamp * 1000).toISOString(),
-          expires_at: new Date((tokenTimestamp + 30) * 1000).toISOString(),
-        }).catch(() => {});
+        try {
+          await supabaseAdmin.from('attendance_tokens').insert({
+            session_id: sessionId,
+            token_hash: tokenHash,
+            created_at: new Date(tokenTimestamp * 1000).toISOString(),
+            expires_at: new Date((tokenTimestamp + 30) * 1000).toISOString(),
+          });
+        } catch (tokInsErr) {}
       } else {
         return res.status(400).json({
           ok: false,

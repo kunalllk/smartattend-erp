@@ -61,8 +61,10 @@ module.exports = async function handler(req, res) {
     }
 
     // Prune expired tokens older than 1 minute
-    const oneMinAgo = new Date(Date.now() - 60000).toISOString();
-    supabaseAdmin.from('attendance_tokens').delete().eq('session_id', sessionId).lt('expires_at', oneMinAgo).then(() => {});
+    try {
+      const oneMinAgo = new Date(Date.now() - 60000).toISOString();
+      await supabaseAdmin.from('attendance_tokens').delete().eq('session_id', sessionId).lt('expires_at', oneMinAgo);
+    } catch (e) {}
 
     return res.status(200).json({
       ok: true,

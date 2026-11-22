@@ -119,13 +119,15 @@ module.exports = async function handler(req, res) {
     // Ensure profile entry exists
     const userId = createData?.user?.id;
     if (userId) {
-      await supabaseAdmin.from('profiles').upsert({
-        id: userId,
-        full_name: target.full_name,
-        roll_number: target.roll_number,
-        role: target.role,
-        email: target.email,
-      }).catch(() => {});
+      try {
+        await supabaseAdmin.from('profiles').upsert({
+          id: userId,
+          full_name: target.full_name,
+          roll_number: target.roll_number,
+          role: target.role,
+          email: target.email,
+        });
+      } catch (e) {}
     }
 
     // Now sign in to get valid session tokens
