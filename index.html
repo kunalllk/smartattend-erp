@@ -1195,27 +1195,34 @@ function App() {
   // Sign in to role with real Supabase Auth
   const handleEnter = async (r) => {
     setLoggingIn(true);
+    const fallbackProfile = {
+      name: r === 'student' ? 'Aarav Sharma' : r === 'faculty' ? 'Dr. Meera Kulkarni' : 'Prof. Rohan Deshmukh',
+      sub: r === 'student' ? 'CSE-3A · S2301' : r === 'faculty' ? 'Dept. of CSE' : 'Academic Office',
+      id: r === 'student' ? ME_ID : uid(),
+    };
+
     try {
       const res = await fetch(`/api/auth-demo?role=${r}`);
       const data = await res.json();
 
-      if (data.ok) {
+      if (data && data.ok) {
         setAuthSession(data.session || null);
         setUserProfile(data.profile || {
-          name: r === 'student' ? 'Aarav Sharma' : r === 'faculty' ? 'Dr. Meera Kulkarni' : 'Prof. Rohan Deshmukh',
-          sub: r === 'student' ? 'CSE-3A · S2301' : r === 'faculty' ? 'Dept. of CSE' : 'Academic Office',
-          id: data.user?.id || (r === 'student' ? ME_ID : uid()),
+          name: data.user?.user_metadata?.full_name || fallbackProfile.name,
+          sub: fallbackProfile.sub,
+          id: data.user?.id || fallbackProfile.id,
         });
         setRole(r);
         setPage('dashboard');
         notify('success', 'Authenticated', `Signed in as ${r.toUpperCase()} with Supabase.`);
       } else {
-        // Fallback demo enter
+        setUserProfile(fallbackProfile);
         setRole(r);
         setPage('dashboard');
       }
     } catch (err) {
       console.warn('Auth fetch note:', err);
+      setUserProfile(fallbackProfile);
       setRole(r);
       setPage('dashboard');
     } finally {
@@ -1235,11 +1242,6 @@ function App() {
     handleEnter(r);
   };
 
-  let body = null;
-  if (role === 'student') body = page === 'attendance' ? html`<${StudentAttendance} app=${{ ...app, st, notify, devTestMode, setDevTestMode }} />` : page === 'lectures' ? html`<${StudentLectures} app=${{ ...app, st, notify }} />` : page === 'materials' ? html`<${StudentMaterials} app=${{ ...app, st, notify }} />` : html`<${StudentDashboard} app=${{ ...app, st, notify }} setPage=${setPage} openScan=${() => setScan(true)} />`;
-  if (role === 'faculty') body = page === 'live' ? html`<${FacultyLive} app=${{ ...app, st, notify, updateLiveToken, endLecture, startLecture }} />` : page === 'roster' ? html`<${FacultyRoster} app=${{ ...app, st, notify }} />` : html`<${FacultyDashboard} app=${{ ...app, st, notify, startLecture }} setPage=${setPage} />`;
-  if (role === 'admin') body = page === 'students' ? html`<${AdminStudents} key=${adminDept} app=${{ ...app, st, notify }} initialDept=${adminDept} />` : page === 'departments' ? html`<${AdminDepartments} app=${{ ...app, st, notify }} openDept=${(n) => { setAdminDept(n); setPage('students'); }} />` : page === 'alerts' ? html`<${AdminAlerts} app=${{ ...app, st, notify }} />` : html`<${AdminDashboard} app=${{ ...app, st, notify }} setPage=${setPage} />`;
-
   const app = {
     st,
     notify,
@@ -1252,6 +1254,11 @@ function App() {
     devTestMode,
     setDevTestMode,
   };
+
+  let body = null;
+  if (role === 'student') body = page === 'attendance' ? html`<${StudentAttendance} app=${app} />` : page === 'lectures' ? html`<${StudentLectures} app=${app} />` : page === 'materials' ? html`<${StudentMaterials} app=${app} />` : html`<${StudentDashboard} app=${app} setPage=${setPage} openScan=${() => setScan(true)} />`;
+  if (role === 'faculty') body = page === 'live' ? html`<${FacultyLive} app=${app} />` : page === 'roster' ? html`<${FacultyRoster} app=${app} />` : html`<${FacultyDashboard} app=${app} setPage=${setPage} />`;
+  if (role === 'admin') body = page === 'students' ? html`<${AdminStudents} key=${adminDept} app=${app} initialDept=${adminDept} />` : page === 'departments' ? html`<${AdminDepartments} app=${app} openDept=${(n) => { setAdminDept(n); setPage('students'); }} />` : page === 'alerts' ? html`<${AdminAlerts} app=${app} />` : html`<${AdminDashboard} app=${app} setPage=${setPage} />`;
 
   return html`<div>
     ${role ? html`<${Shell} app=${app} role=${role} page=${page} setPage=${(p) => { setAdminDept('all'); setPage(p); }} switchRole=${switchRole} onLogout=${handleLogout}>${body}<//>` : html`<${Landing} onEnter=${handleEnter} loggingIn=${loggingIn} />`}
